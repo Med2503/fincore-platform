@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: intelligence-service
+
+server:
+  port: 8086

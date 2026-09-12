@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: quant-service
+
+server:
+  port: 8085
