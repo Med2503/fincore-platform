@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: identity-service
+
+
+  datasource:
+    url: jdbc:postgres://localhost:5432/identity_db
+    username: bank_user
+    password: bank_password
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+
+
+server:
+  port: 8081
