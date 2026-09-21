@@ -4,6 +4,7 @@ package org.fincore.identity.user.infrastructure.persistence;
 import jakarta.persistence.*;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(
@@ -20,7 +21,7 @@ import java.time.Instant;
 public class UserJpaEntity {
 
     @Id
-    private Long id;
+    private UUID id;
     @Column(nullable = false, length = 100)
     private String username;
     @Column(name = "password_hash", nullable = false)
@@ -45,11 +46,11 @@ public class UserJpaEntity {
 
     }
 
-    public Long getId() {
+    public UUID getId() {
         return id;
     }
 
-    public void setId(Long id) {
+    public void setId(UUID id) {
         this.id = id;
     }
 

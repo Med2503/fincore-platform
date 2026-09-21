@@ -1,30 +1,62 @@
 package org.fincore.identity.user.domain.model;
 
 import java.time.Instant;
+import java.util.UUID;
 
 public class User {
-    private Long id;
+
+    private final UUID id;
     private String username;
     private String passwordHash;
     private UserStatus status;
-    private Instant lockUntil;
     private int failedLoginAttempts;
+    private Instant lockedUntil;
     private final Instant createdAt;
     private Instant updatedAt;
     private long version;
 
-    public User(Long id,
-                String username,
-                String passwordHash,
-                UserStatus status,
-                Instant createdAt) {
+    // Création d'un nouvel utilisateur
+    public User(
+            UUID id,
+            String username,
+            String passwordHash,
+            UserStatus status,
+            Instant createdAt
+    ) {
+        this(
+                id,
+                username,
+                passwordHash,
+                status,
+                0,
+                null,
+                createdAt,
+                createdAt,
+                0L
+        );
+    }
+
+    // Reconstruction complète depuis la persistence
+    public User(
+            UUID id,
+            String username,
+            String passwordHash,
+            UserStatus status,
+            int failedLoginAttempts,
+            Instant lockedUntil,
+            Instant createdAt,
+            Instant updatedAt,
+            long version
+    ) {
         this.id = id;
         this.username = username;
         this.passwordHash = passwordHash;
         this.status = status;
+        this.failedLoginAttempts = failedLoginAttempts;
+        this.lockedUntil = lockedUntil;
         this.createdAt = createdAt;
-        this.updatedAt = createdAt;
-
+        this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public boolean isActive() {
@@ -32,7 +64,9 @@ public class User {
     }
 
     public boolean isLocked() {
-        return status == UserStatus.LOCKED && lockUntil != null && lockUntil.isAfter(Instant.now());
+        return status == UserStatus.LOCKED
+                && lockedUntil != null
+                && lockedUntil.isAfter(Instant.now());
     }
 
     public void recordFailedLogin() {
@@ -43,23 +77,21 @@ public class User {
     public void resetFailedLoginAttempts() {
         failedLoginAttempts = 0;
         updatedAt = Instant.now();
-
     }
 
     public void lockUntil(Instant until) {
-        this.status = UserStatus.LOCKED;
-        this.lockUntil = until;
-        this.updatedAt = Instant.now();
+        status = UserStatus.LOCKED;
+        lockedUntil = until;
+        updatedAt = Instant.now();
     }
 
     public void activate() {
-        this.status = UserStatus.ACTIVE;
-        this.lockUntil = null;
-        this.updatedAt = Instant.now();
+        status = UserStatus.ACTIVE;
+        lockedUntil = null;
+        updatedAt = Instant.now();
     }
 
-
-    public long getId() {
+    public UUID getId() {
         return id;
     }
 
@@ -79,8 +111,8 @@ public class User {
         return failedLoginAttempts;
     }
 
-    public Instant getLockUntil() {
-        return lockUntil;
+    public Instant getLockedUntil() {
+        return lockedUntil;
     }
 
     public Instant getCreatedAt() {
@@ -94,6 +126,4 @@ public class User {
     public long getVersion() {
         return version;
     }
-
-
 }

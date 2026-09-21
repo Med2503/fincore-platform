@@ -1,5 +1,5 @@
 CREATE TABLE users (
-    id BIGINT PRIMARY KEY,
+    id UUID PRIMARY KEY,
 
     username VARCHAR(100) NOT NULL,
 
