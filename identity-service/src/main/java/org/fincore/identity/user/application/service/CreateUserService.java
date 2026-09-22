@@ -1,4 +1,4 @@
-package org.fincore.identity.user.application;
+package org.fincore.identity.user.application.service;
 
 import org.fincore.identity.user.application.command.CreateUserCommand;
 import org.fincore.identity.user.application.exception.DuplicateUsernameException;
@@ -6,6 +6,7 @@ import org.fincore.identity.user.application.port.PasswordHasher;
 import org.fincore.identity.user.domain.model.User;
 import org.fincore.identity.user.domain.model.UserStatus;
 import org.fincore.identity.user.domain.repository.UserRepository;
+import org.fincore.identity.user.application.usecase.CreateUserUseCase;
 
 import java.time.Instant;
 import java.util.UUID;

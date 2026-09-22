@@ -2,7 +2,7 @@ package org.fincore.identity.user.api;
 
 
 import jakarta.validation.Valid;
-import org.fincore.identity.user.application.CreateUserUseCase;
+import org.fincore.identity.user.application.usecase.CreateUserUseCase;
 import org.fincore.identity.user.application.command.CreateUserCommand;
 import org.fincore.identity.user.domain.model.User;
 import org.springframework.http.HttpStatus;
