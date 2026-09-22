@@ -11,6 +11,7 @@ public record UserResponse(
         String status,
         Instant createdAt
 ) {
+
     public static UserResponse from(User user) {
         return new UserResponse(
                 user.getId(),
@@ -18,6 +19,5 @@ public record UserResponse(
                 user.getStatus().name(),
                 user.getCreatedAt()
         );
-
     }
 }

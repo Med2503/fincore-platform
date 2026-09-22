@@ -1,6 +1,5 @@
 package org.fincore.identity.shared.web;
 
-
 import jakarta.servlet.http.HttpServletRequest;
 import org.fincore.identity.shared.error.ApiError;
 import org.fincore.identity.shared.error.ErrorCode;
@@ -30,16 +29,22 @@ public class GlobalExceptionHandler {
         );
     }
 
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
+
     public ResponseEntity<ApiError> handleValidation(
             MethodArgumentNotValidException exception,
             HttpServletRequest request
     ) {
-        String message = exception.getBindingResult()
+
+        String message = exception
+                .getBindingResult()
                 .getFieldErrors()
                 .stream()
                 .map(error ->
-                        error.getField() + ": " + error.getDefaultMessage()
+                        error.getField()
+                                + ": "
+                                + error.getDefaultMessage()
                 )
                 .collect(Collectors.joining(", "));
 
@@ -56,6 +61,7 @@ public class GlobalExceptionHandler {
             Exception exception,
             HttpServletRequest request
     ) {
+
         return buildError(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 ErrorCode.INTERNAL_ERROR,
@@ -70,13 +76,19 @@ public class GlobalExceptionHandler {
             String message,
             HttpServletRequest request
     ) {
+
+        String correlationId =
+                request.getHeader(
+                        CorrelationIdFilter.HEADER_NAME
+                );
+
         ApiError error = new ApiError(
                 Instant.now(),
                 status.value(),
                 code,
                 message,
                 request.getRequestURI(),
-                request.getHeader("X-Correlation-Id")
+                correlationId
         );
 
         return ResponseEntity
