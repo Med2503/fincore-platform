@@ -15,7 +15,6 @@ public class User {
     private Instant updatedAt;
     private long version;
 
-    // Création d'un nouvel utilisateur
     public User(
             UUID id,
             String username,
@@ -36,7 +35,6 @@ public class User {
         );
     }
 
-    // Reconstruction complète depuis la persistence
     public User(
             UUID id,
             String username,
@@ -69,7 +67,17 @@ public class User {
                 && lockedUntil.isAfter(Instant.now());
     }
 
+    public boolean isDisabled() {
+        return status == UserStatus.DISABLED;
+    }
+
+    public boolean isPending() {
+        return status == UserStatus.PENDING;
+    }
+
     public void recordFailedLogin() {
+        ensureLoginAllowed();
+
         failedLoginAttempts++;
         updatedAt = Instant.now();
     }
@@ -80,6 +88,12 @@ public class User {
     }
 
     public void lockUntil(Instant until) {
+        if (until == null) {
+            throw new IllegalArgumentException(
+                    "Lock expiration cannot be null"
+            );
+        }
+
         status = UserStatus.LOCKED;
         lockedUntil = until;
         updatedAt = Instant.now();
@@ -88,7 +102,34 @@ public class User {
     public void activate() {
         status = UserStatus.ACTIVE;
         lockedUntil = null;
+        failedLoginAttempts = 0;
         updatedAt = Instant.now();
+    }
+
+    public void disable() {
+        status = UserStatus.DISABLED;
+        lockedUntil = null;
+        updatedAt = Instant.now();
+    }
+
+    private void ensureLoginAllowed() {
+        if (status == UserStatus.DISABLED) {
+            throw new IllegalStateException(
+                    "Disabled user cannot authenticate"
+            );
+        }
+
+        if (status == UserStatus.LOCKED) {
+            throw new IllegalStateException(
+                    "Locked user cannot authenticate"
+            );
+        }
+
+        if (status == UserStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Pending user cannot authenticate"
+            );
+        }
     }
 
     public UUID getId() {
