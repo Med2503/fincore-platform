@@ -1,8 +1,10 @@
 package org.fincore.identity.user.infrastructure.persistence;
 
+import org.fincore.identity.user.application.exception.DuplicateUsernameException;
 import org.fincore.identity.user.domain.model.User;
 import org.fincore.identity.user.domain.model.UserStatus;
 import org.fincore.identity.user.domain.repository.UserRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
@@ -19,10 +21,14 @@ public class UserRepositoryAdapter implements UserRepository {
 
     @Override
     public User save(User user) {
-        UserJpaEntity entity = toEntity(user);
-        UserJpaEntity saved = repository.save(entity);
+        try {
+            UserJpaEntity entity = toEntity(user);
+            UserJpaEntity saved = repository.save(entity);
 
-        return toDomain(saved);
+            return toDomain(saved);
+        } catch (DataIntegrityViolationException ex) {
+            throw new DuplicateUsernameException(user.getUsername());
+        }
     }
 
     @Override

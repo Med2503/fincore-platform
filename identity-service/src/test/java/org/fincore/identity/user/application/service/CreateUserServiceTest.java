@@ -28,13 +28,17 @@ class CreateUserServiceTest {
     @Mock
     private PasswordHasher passwordHasher;
 
+    @Mock
+    private UsernameNormalizer normalizer;
+
     private CreateUserService service;
 
     @BeforeEach
     void setUp() {
         service = new CreateUserService(
                 userRepository,
-                passwordHasher
+                passwordHasher,
+                normalizer
         );
     }
 
@@ -260,5 +264,33 @@ class CreateUserServiceTest {
                 UserStatus.PENDING,
                 result.getStatus()
         );
+    }
+    @Test
+    void shouldNormalizeUsernameBeforeCheckingExistence() {
+
+        CreateUserCommand command =
+                new CreateUserCommand(
+                        "  JOHN  ",
+                        "Password123!"
+                );
+
+        when(userRepository.existsByUsername("john"))
+                .thenReturn(false);
+
+        when(passwordHasher.hash("Password123!"))
+                .thenReturn("$2a$12$hash");
+
+        when(userRepository.save(any(User.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = service.create(command);
+
+        assertEquals(
+                "john",
+                result.getUsername()
+        );
+
+        verify(userRepository)
+                .existsByUsername("john");
     }
 }

@@ -15,17 +15,21 @@ public class CreateUserService implements CreateUserUseCase {
 
     private final UserRepository userRepository;
     private final PasswordHasher passwordHasher;
+    private final UsernameNormalizer normalizer;
 
-    public CreateUserService(UserRepository userRepository, PasswordHasher passwordHasher) {
+    public CreateUserService(UserRepository userRepository, PasswordHasher passwordHasher, UsernameNormalizer normalizer) {
         this.userRepository = userRepository;
         this.passwordHasher = passwordHasher;
+        this.normalizer = normalizer;
     }
 
 
     @Override
     public User create(CreateUserCommand command) {
-        if (userRepository.existsByUsername(command.username())) {
-            throw new DuplicateUsernameException(command.username());
+
+        String username = normalizer.normalize(command.username());
+        if (userRepository.existsByUsername(username)) {
+            throw new DuplicateUsernameException(username);
         }
 
         String passwordHash = passwordHasher.hash(command.password());
@@ -34,7 +38,7 @@ public class CreateUserService implements CreateUserUseCase {
 
         User user = new User(
                 UUID.randomUUID(),
-                command.username(),
+                username,
                 passwordHash,
                 UserStatus.PENDING,
                 now
