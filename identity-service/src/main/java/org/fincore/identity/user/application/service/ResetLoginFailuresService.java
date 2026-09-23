@@ -1,6 +1,7 @@
 package org.fincore.identity.user.application.service;
 
 
+import org.fincore.identity.user.application.exception.UserNotFoundException;
 import org.fincore.identity.user.application.usecase.ResetLoginFailuresUseCase;
 import org.fincore.identity.user.domain.model.User;
 import org.fincore.identity.user.domain.repository.UserRepository;
@@ -25,9 +26,7 @@ public class ResetLoginFailuresService
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "User not found: " + userId
-                        )
+                        new UserNotFoundException(userId)
                 );
 
         user.resetFailedLoginAttempts();

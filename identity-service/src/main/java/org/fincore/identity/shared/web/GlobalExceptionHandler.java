@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.fincore.identity.shared.error.ApiError;
 import org.fincore.identity.shared.error.ErrorCode;
 import org.fincore.identity.user.application.exception.DuplicateUsernameException;
+import org.fincore.identity.user.application.exception.UserNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -94,5 +95,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(error);
+    }
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity<ApiError> handleUserNotFound(
+            UserNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return buildError(
+                HttpStatus.NOT_FOUND,
+                ErrorCode.USER_NOT_FOUND,
+                exception.getMessage(),
+                request
+        );
     }
 }

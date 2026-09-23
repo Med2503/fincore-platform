@@ -1,5 +1,6 @@
 package org.fincore.identity.user.application.service;
 
+import org.fincore.identity.user.application.exception.UserNotFoundException;
 import org.fincore.identity.user.application.security.AccountLockPolicy;
 import org.fincore.identity.user.application.usecase.RecordLoginFailureUseCase;
 import org.fincore.identity.user.domain.model.User;
@@ -26,7 +27,7 @@ public class RecordLoginFailureService implements RecordLoginFailureUseCase {
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() ->
-                        new IllegalArgumentException("User not found! " + userId)
+                        new UserNotFoundException(userId)
                 );
         user.recordFailedLogin();
 

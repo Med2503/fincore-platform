@@ -1,6 +1,7 @@
 package org.fincore.identity.user.application.service;
 
 
+import org.fincore.identity.user.application.exception.UserNotFoundException;
 import org.fincore.identity.user.application.security.AccountLockPolicy;
 import org.fincore.identity.user.domain.model.User;
 import org.fincore.identity.user.domain.model.UserStatus;
@@ -126,5 +127,21 @@ class RecordLoginFailureServiceTest {
                 UserStatus.ACTIVE,
                 now
         );
+    }
+    @Test
+    void shouldThrowWhenUserDoesNotExist() {
+
+        UUID userId = UUID.randomUUID();
+
+        when(userRepository.findById(userId))
+                .thenReturn(java.util.Optional.empty());
+
+        assertThrows(
+                UserNotFoundException.class,
+                () -> service.record(userId)
+        );
+
+        verify(userRepository, never())
+                .save(any());
     }
 }
