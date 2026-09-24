@@ -67,12 +67,29 @@ public class User {
                 && lockedUntil.isAfter(Instant.now());
     }
 
+    public boolean isLockExpired() {
+        return status == UserStatus.LOCKED
+                && lockedUntil != null
+                && !lockedUntil.isAfter(Instant.now());
+    }
+
     public boolean isDisabled() {
         return status == UserStatus.DISABLED;
     }
 
     public boolean isPending() {
         return status == UserStatus.PENDING;
+    }
+
+    public void unlockIfExpired() {
+        if (!isLockExpired()) {
+            return;
+        }
+
+        status = UserStatus.ACTIVE;
+        lockedUntil = null;
+        failedLoginAttempts = 0;
+        updatedAt = Instant.now();
     }
 
     public void recordFailedLogin() {
@@ -119,15 +136,15 @@ public class User {
             );
         }
 
-        if (status == UserStatus.LOCKED) {
-            throw new IllegalStateException(
-                    "Locked user cannot authenticate"
-            );
-        }
-
         if (status == UserStatus.PENDING) {
             throw new IllegalStateException(
                     "Pending user cannot authenticate"
+            );
+        }
+
+        if (status == UserStatus.LOCKED && isLocked()) {
+            throw new IllegalStateException(
+                    "Locked user cannot authenticate"
             );
         }
     }

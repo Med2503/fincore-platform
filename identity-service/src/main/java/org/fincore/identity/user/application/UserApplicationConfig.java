@@ -1,6 +1,9 @@
 package org.fincore.identity.user.application;
 
 
+import org.fincore.identity.auth.application.port.TokenIssuer;
+import org.fincore.identity.auth.application.service.LoginService;
+import org.fincore.identity.auth.application.usecase.LoginUseCase;
 import org.fincore.identity.user.application.port.PasswordHasher;
 import org.fincore.identity.user.application.security.AccountLockPolicy;
 import org.fincore.identity.user.application.service.RecordLoginFailureService;
@@ -40,6 +43,25 @@ public class UserApplicationConfig {
     ) {
         return new ResetLoginFailuresService(
                 userRepository
+        );
+    }
+
+    @Bean
+    public LoginUseCase loginUseCase(
+            UserRepository userRepository,
+            PasswordHasher passwordHasher,
+            RecordLoginFailureUseCase recordLoginFailureUseCase,
+            ResetLoginFailuresUseCase resetLoginFailuresUseCase,
+            TokenIssuer tokenIssuer,
+            UsernameNormalizer usernameNormalizer
+    ) {
+        return new LoginService(
+                userRepository,
+                passwordHasher,
+                recordLoginFailureUseCase,
+                resetLoginFailuresUseCase,
+                tokenIssuer,
+                usernameNormalizer
         );
     }
 }
