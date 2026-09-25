@@ -1,6 +1,10 @@
 package org.fincore.identity.shared.web;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.fincore.identity.auth.application.exception.AccountDisabledException;
+import org.fincore.identity.auth.application.exception.AccountLockedException;
+import org.fincore.identity.auth.application.exception.AccountPendingException;
+import org.fincore.identity.auth.application.exception.InvalidCredentialsException;
 import org.fincore.identity.shared.error.ApiError;
 import org.fincore.identity.shared.error.ErrorCode;
 import org.fincore.identity.user.application.exception.DuplicateUsernameException;
@@ -104,6 +108,55 @@ public class GlobalExceptionHandler {
         return buildError(
                 HttpStatus.NOT_FOUND,
                 ErrorCode.USER_NOT_FOUND,
+                exception.getMessage(),
+                request
+        );
+    }
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ApiError> handleInvalidCredentials(
+            InvalidCredentialsException exception,
+            HttpServletRequest request
+    ) {
+        return buildError(
+                HttpStatus.UNAUTHORIZED,
+                ErrorCode.INVALID_CREDENTIALS,
+                exception.getMessage(),
+                request
+        );
+    }
+    @ExceptionHandler(AccountLockedException.class)
+    public ResponseEntity<ApiError> handleAccountLocked(
+            AccountLockedException exception,
+            HttpServletRequest request
+    ) {
+        return buildError(
+                HttpStatus.LOCKED,
+                ErrorCode.ACCOUNT_LOCKED,
+                exception.getMessage(),
+                request
+        );
+    }
+    @ExceptionHandler(AccountDisabledException.class)
+    public ResponseEntity<ApiError> handleAccountDisabled(
+            AccountDisabledException exception,
+            HttpServletRequest request
+    ) {
+        return buildError(
+                HttpStatus.FORBIDDEN,
+                ErrorCode.ACCOUNT_DISABLED,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(AccountPendingException.class)
+    public ResponseEntity<ApiError> handleAccountPending(
+            AccountPendingException exception,
+            HttpServletRequest request
+    ) {
+        return buildError(
+                HttpStatus.FORBIDDEN,
+                ErrorCode.ACCOUNT_PENDING,
                 exception.getMessage(),
                 request
         );

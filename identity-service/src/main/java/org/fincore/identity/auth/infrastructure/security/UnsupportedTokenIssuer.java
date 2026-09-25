@@ -4,7 +4,9 @@ import org.fincore.identity.auth.application.port.TokenIssuer;
 import org.fincore.identity.user.domain.model.User;
 import org.springframework.stereotype.Component;
 
-@Component
+
+// for dev grade
+/*@Component
 public class UnsupportedTokenIssuer implements TokenIssuer {
 
     @Override
@@ -13,4 +15,4 @@ public class UnsupportedTokenIssuer implements TokenIssuer {
                 "JWT token issuer is not implemented yet"
         );
     }
-}
+}*/
