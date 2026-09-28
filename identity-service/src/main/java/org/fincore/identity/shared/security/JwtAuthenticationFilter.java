@@ -9,12 +9,14 @@ import org.fincore.identity.shared.security.jwt.InvalidJwtException;
 import org.fincore.identity.shared.security.jwt.JwtPrincipal;
 import org.fincore.identity.shared.security.jwt.JwtTokenValidator;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -51,10 +53,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             JwtPrincipal principal = tokenValidator.validate(token);
 
-            var authority = new SimpleGrantedAuthority(
-                    "ROLE_" + principal.role()
-            );
-
+            List<GrantedAuthority> authorities = new ArrayList<>();
+            principal.roles().stream()
+                    .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                    .forEach(authorities::add);
+            principal.permissions().stream()
+                    .map(SimpleGrantedAuthority::new)
+                    .forEach(authorities::add);
             var authentication =
                     new UsernamePasswordAuthenticationToken(
                             new AuthenticatedUser(
@@ -62,7 +67,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     principal.username()
                             ),
                             null,
-                            List.of(authority)
+                            authorities
                     );
 
             SecurityContextHolder.getContext()

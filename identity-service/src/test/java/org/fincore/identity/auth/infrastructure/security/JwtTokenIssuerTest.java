@@ -3,6 +3,7 @@ package org.fincore.identity.auth.infrastructure.security;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.fincore.identity.auth.application.port.UserAuthoritiesProvider;
 import org.fincore.identity.auth.application.port.UserRoleProvider;
 import org.fincore.identity.shared.security.config.JwtProperties;
 import org.fincore.identity.shared.security.jwt.JwtKeyProvider;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.crypto.SecretKey;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,12 +39,15 @@ class JwtTokenIssuerTest {
                 new JwtKeyProvider(properties);
 
         UserRoleProvider roleProvider =
-                user -> "CUSTOMER";
+                user -> List.of("CUSTOMER");
+        UserAuthoritiesProvider authoritiesProvider =
+                userId -> List.of("PROFILE_READ");
 
         issuer = new JwtTokenIssuer(
                 keyProvider,
                 properties,
-                roleProvider
+                roleProvider,
+                authoritiesProvider
         );
     }
 
@@ -138,6 +143,7 @@ class JwtTokenIssuerTest {
                 duration
         );
     }
+
     @Test
     void shouldRejectBlankSecret() {
 
@@ -149,6 +155,7 @@ class JwtTokenIssuerTest {
                 () -> new JwtKeyProvider(properties)
         );
     }
+
     @Test
     void shouldRejectShortSecret() {
 
