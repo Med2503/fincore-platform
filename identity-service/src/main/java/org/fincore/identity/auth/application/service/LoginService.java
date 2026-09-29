@@ -5,6 +5,7 @@ import org.fincore.identity.auth.application.exception.AccountDisabledException;
 import org.fincore.identity.auth.application.exception.AccountLockedException;
 import org.fincore.identity.auth.application.exception.AccountPendingException;
 import org.fincore.identity.auth.application.exception.InvalidCredentialsException;
+import org.fincore.identity.auth.application.port.RefreshTokenIssuer;
 import org.fincore.identity.auth.application.port.TokenIssuer;
 import org.fincore.identity.auth.application.result.LoginResult;
 import org.fincore.identity.auth.application.usecase.LoginUseCase;
@@ -22,14 +23,16 @@ public class LoginService implements LoginUseCase {
     private final ResetLoginFailuresUseCase resetLoginFailuresUseCase;
     private final TokenIssuer tokenIssuer;
     private final UsernameNormalizer usernameNormalizer;
+    private final RefreshTokenIssuer refreshTokenIssuer;
 
-    public LoginService(UserRepository userRepository, PasswordHasher passwordHasher, RecordLoginFailureUseCase recordLoginFailureUseCase, ResetLoginFailuresUseCase resetLoginFailuresUseCase, TokenIssuer tokenIssuer, UsernameNormalizer usernameNormalizer) {
+    public LoginService(UserRepository userRepository, PasswordHasher passwordHasher, RecordLoginFailureUseCase recordLoginFailureUseCase, ResetLoginFailuresUseCase resetLoginFailuresUseCase, TokenIssuer tokenIssuer, UsernameNormalizer usernameNormalizer, RefreshTokenIssuer refreshTokenIssuer) {
         this.userRepository = userRepository;
         this.passwordHasher = passwordHasher;
         this.recordLoginFailureUseCase = recordLoginFailureUseCase;
         this.resetLoginFailuresUseCase = resetLoginFailuresUseCase;
         this.tokenIssuer = tokenIssuer;
         this.usernameNormalizer = usernameNormalizer;
+        this.refreshTokenIssuer = refreshTokenIssuer;
     }
 
 
@@ -49,7 +52,8 @@ public class LoginService implements LoginUseCase {
         }
         resetLoginFailuresUseCase.reset(user.getId());
         String accessToken = tokenIssuer.issue(user);
-        return new LoginResult(accessToken);
+        String refreshToken = refreshTokenIssuer.issue(user);
+        return new LoginResult(accessToken, refreshToken, 900);
 
     }
 

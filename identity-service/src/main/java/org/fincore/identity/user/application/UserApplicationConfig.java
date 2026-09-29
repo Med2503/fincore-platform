@@ -1,6 +1,7 @@
 package org.fincore.identity.user.application;
 
 
+import org.fincore.identity.auth.application.port.RefreshTokenIssuer;
 import org.fincore.identity.auth.application.port.TokenIssuer;
 import org.fincore.identity.auth.application.service.LoginService;
 import org.fincore.identity.auth.application.usecase.LoginUseCase;
@@ -16,6 +17,8 @@ import org.fincore.identity.user.application.service.CreateUserService;
 import org.fincore.identity.user.application.usecase.CreateUserUseCase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.Clock;
 
 @Configuration
 public class UserApplicationConfig {
@@ -53,7 +56,8 @@ public class UserApplicationConfig {
             RecordLoginFailureUseCase recordLoginFailureUseCase,
             ResetLoginFailuresUseCase resetLoginFailuresUseCase,
             TokenIssuer tokenIssuer,
-            UsernameNormalizer usernameNormalizer
+            UsernameNormalizer usernameNormalizer,
+            RefreshTokenIssuer refreshTokenIssuer
     ) {
         return new LoginService(
                 userRepository,
@@ -61,8 +65,14 @@ public class UserApplicationConfig {
                 recordLoginFailureUseCase,
                 resetLoginFailuresUseCase,
                 tokenIssuer,
-                usernameNormalizer
+                usernameNormalizer,
+                refreshTokenIssuer
         );
+    }
+
+    @Bean
+    Clock clock() {
+        return Clock.systemUTC();
     }
 }
 

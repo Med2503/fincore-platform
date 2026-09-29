@@ -5,6 +5,7 @@ import org.fincore.identity.auth.application.exception.AccountDisabledException;
 import org.fincore.identity.auth.application.exception.AccountLockedException;
 import org.fincore.identity.auth.application.exception.AccountPendingException;
 import org.fincore.identity.auth.application.exception.InvalidCredentialsException;
+import org.fincore.identity.auth.application.port.RefreshTokenIssuer;
 import org.fincore.identity.auth.application.port.TokenIssuer;
 import org.fincore.identity.auth.application.result.LoginResult;
 import org.fincore.identity.user.application.port.PasswordHasher;
@@ -33,6 +34,7 @@ class LoginServiceTest {
     private TokenIssuer tokenIssuer;
     private LoginService service;
     private UsernameNormalizer normalizer;
+    private RefreshTokenIssuer refreshTokenIssuer;
 
     @BeforeEach
     void setUp() {
@@ -44,13 +46,15 @@ class LoginServiceTest {
                 mock(ResetLoginFailuresUseCase.class);
         tokenIssuer = mock(TokenIssuer.class);
         normalizer = mock(UsernameNormalizer.class);
+        refreshTokenIssuer = mock(RefreshTokenIssuer.class);
         service = new LoginService(
                 userRepository,
                 passwordHasher,
                 recordLoginFailureUseCase,
                 resetLoginFailuresUseCase,
                 tokenIssuer,
-                normalizer);
+                normalizer,
+                refreshTokenIssuer);
     }
 
     @Test

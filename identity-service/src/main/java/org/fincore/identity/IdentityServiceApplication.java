@@ -1,12 +1,13 @@
 package org.fincore.identity;
 
+import org.fincore.identity.security.refresh.RefreshTokenProperties;
 import org.fincore.identity.shared.security.config.JwtProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, RefreshTokenProperties.class})
 public class IdentityServiceApplication {
 
     public static void main(String[] args) {

@@ -1,6 +1,6 @@
-package org.fincore.identity.auth.application.result;
+package org.fincore.identity.refresh.api.dto;
 
-public record LoginResult(
+public record RefreshSession(
         String accessToken,
         String refreshToken,
         long expiresIn
