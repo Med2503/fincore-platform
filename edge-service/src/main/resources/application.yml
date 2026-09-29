@@ -1,6 +1,60 @@
-spring:
-  application:
-      name: edge-service
-
 server:
   port: 8080
+
+spring:
+  application:
+    name: edge-service
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  cloud:
+    gateway:
+      routes:
+        - id: identity-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/auth/**,/api/v1/users/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                key-resolver: "#{@clientKeyResolver}"
+
+        - id: wealth-service
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/wealth/**
+
+        - id: ledger-service
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/v1/ledger/**
+
+        - id: execution-service
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/v1/execution/**
+
+        - id: quant-service
+          uri: http://localhost:8085
+          predicates:
+            - Path=/api/v1/quant/**
+
+        - id: intelligence-service
+          uri: http://localhost:8086
+          predicates:
+            - Path=/api/v1/intelligence/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+security:
+  jwt:
+    secret: ${JWT_SECRET}
