@@ -12,4 +12,7 @@ public interface RefreshTokenRepository {
     RefreshToken save(RefreshToken refreshToken);
 
     int revokeActiveFamily(UUID familyId, Instant revokedAt);
+
+
+    int revokeAllActiveForUser(UUID userId, Instant revokedAt);
 }

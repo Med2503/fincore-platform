@@ -44,4 +44,9 @@ public class RefreshTokenRepositoryAdapter implements RefreshTokenRepository {
     public int revokeActiveFamily(UUID familyId, Instant revokedAt) {
         return springDataRepository.revokeActiveFamily(familyId, revokedAt);
     }
+
+    @Override
+    public int revokeAllActiveForUser(UUID userId, Instant revokedAt) {
+        return springDataRepository.revokeAllActiveForUser(userId, revokedAt);
+    }
 }
