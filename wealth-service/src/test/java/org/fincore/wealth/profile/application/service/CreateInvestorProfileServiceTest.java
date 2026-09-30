@@ -1,4 +1,4 @@
-package org.fincore.wealth.application.service;
+package org.fincore.wealth.profile.application.service;
 
 import org.fincore.wealth.profile.application.command.CreateInvestorProfileCommand;
 import org.fincore.wealth.profile.application.exception.InvestorProfileAlreadyExistsException;
