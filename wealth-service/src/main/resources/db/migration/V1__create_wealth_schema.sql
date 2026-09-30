@@ -51,13 +51,13 @@ CREATE TABLE positions (
     updated_at TIMESTAMPTZ NOT NULL,
     version BIGINT NOT NULL DEFAULT 0,
 
-    CONSTRAINT uk_position_portfolio_asset
+    CONSTRAINT uk_positions_portfolio_asset
         UNIQUE (portfolio_id, asset_id),
-    CONSTRAINT ck_position_quantity
-        CHECK (quantity >= 0),
-    CONSTRAINT ck_position_average_cost
+    CONSTRAINT ck_positions_quantity_positive
+        CHECK (quantity > 0),
+    CONSTRAINT ck_positions_average_cost_nonnegative
         CHECK (average_cost >= 0),
-    CONSTRAINT ck_position_currency
+    CONSTRAINT ck_positions_currency
         CHECK (currency ~ '^[A-Z]{3}$')
 );
 

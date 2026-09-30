@@ -1,6 +1,5 @@
-package org.fincore.wealth.position;
+package org.fincore.wealth.position.domain;
 
-import org.fincore.wealth.position.domain.Position;
 import org.fincore.wealth.position.exception.InsufficientPositionQuantityException;
 import org.junit.jupiter.api.Test;
 

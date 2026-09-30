@@ -1,5 +1,7 @@
 package org.fincore.wealth.position.domain;
 
+import org.fincore.wealth.position.exception.InsufficientPositionQuantityException;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -99,7 +101,7 @@ public record Position(
         requireSameCurrency(tradeCurrency);
 
         if (soldQuantity.compareTo(quantity) > 0) {
-            throw new InsufficientPositionQuantityException();
+            throw new InsufficientPositionQuantityException("Insuffisant balance");
         }
 
         BigDecimal realizedPnl = price.subtract(averageCost)
