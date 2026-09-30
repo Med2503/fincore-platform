@@ -1,6 +1,28 @@
+server:
+  port: 8082
+
 spring:
   application:
     name: wealth-service
 
-server:
-  port: 8082
+  datasource:
+    url: jdbc:postgresql://localhost:5432/wealth_db
+    username: bank_user
+    password: ${WEALTH_DB_PASSWORD}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
