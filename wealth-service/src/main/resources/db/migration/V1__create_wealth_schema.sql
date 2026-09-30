@@ -63,3 +63,8 @@ CREATE TABLE positions (
 
 CREATE INDEX idx_positions_portfolio_id
     ON positions(portfolio_id);
+
+CREATE TABLE processed_wealth_events (
+    event_id UUID PRIMARY KEY,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
