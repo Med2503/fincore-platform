@@ -3,9 +3,11 @@ package org.fincore.wealth.position.infrastructure.persistence;
 
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.domain.Position;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -38,5 +40,12 @@ public class PositionRepositoryAdapter implements PositionRepository {
     @Override
     public void delete(Position position) {
         repository.findById(position.id()).ifPresent(repository::delete);
+    }
+
+    @Override
+    public List<Position> findAllByPortfolioId(UUID portfolioId, Pageable pageable) {
+        return repository.findAllByPortfolioId(portfolioId, pageable)
+                .map(mapper::toDomain)
+                .getContent();
     }
 }

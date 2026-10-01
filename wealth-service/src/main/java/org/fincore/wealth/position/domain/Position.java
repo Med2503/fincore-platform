@@ -101,7 +101,7 @@ public record Position(
         requireSameCurrency(tradeCurrency);
 
         if (soldQuantity.compareTo(quantity) > 0) {
-            throw new InsufficientPositionQuantityException("Insuffisant balance");
+            throw new InsufficientPositionQuantityException("Insuffisant Qauntity");
         }
 
         BigDecimal realizedPnl = price.subtract(averageCost)

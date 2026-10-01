@@ -1,7 +1,9 @@
 package org.fincore.wealth.position.application.port;
 
 import org.fincore.wealth.position.domain.Position;
+import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -11,4 +13,6 @@ public interface PositionRepository {
     Position save(Position position);
 
     void delete(Position position);
+
+    List<Position> findAllByPortfolioId(UUID portfolioId, Pageable pageable);
 }

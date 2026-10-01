@@ -2,6 +2,8 @@ package org.fincore.wealth.position.infrastructure.persistence;
 
 import jakarta.persistence.LockModeType;
 import org.fincore.wealth.position.infrastructure.persistence.PositionJpaEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -28,5 +30,10 @@ public interface SpringDataPositionRepository
     Optional<PositionJpaEntity> findByPortfolioIdAndAssetId(
             UUID portfolioId,
             UUID assetId
+    );
+
+    Page<PositionJpaEntity> findAllByPortfolioId(
+            UUID portfolioId,
+            Pageable pageable
     );
 }
