@@ -48,4 +48,12 @@ public class PositionRepositoryAdapter implements PositionRepository {
                 .map(mapper::toDomain)
                 .getContent();
     }
+
+    @Override
+    public List<Position> findAllByPortfolioId(UUID portfolioId) {
+        return repository.findAllByPortfolioIdOrderByAssetIdAsc(portfolioId)
+                .stream()
+                .map(mapper::toDomain)
+                .toList();
+    }
 }

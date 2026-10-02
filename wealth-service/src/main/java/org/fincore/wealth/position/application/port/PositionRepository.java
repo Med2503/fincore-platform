@@ -15,4 +15,6 @@ public interface PositionRepository {
     void delete(Position position);
 
     List<Position> findAllByPortfolioId(UUID portfolioId, Pageable pageable);
+
+    List<Position> findAllByPortfolioId(UUID portfolioId);
 }
