@@ -1,4 +1,8 @@
 package org.fincore.wealth.position.application.port;
+
+
+import org.fincore.wealth.position.application.port.PositionRepository;
+import org.fincore.wealth.position.application.port.ProcessedEventRepository;
 import org.fincore.wealth.position.domain.ExecutionEvent;
 import org.fincore.wealth.position.domain.Position;
 import org.springframework.stereotype.Service;
@@ -6,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ExecutionEventProcessor {
+
     private final PositionRepository positions;
     private final ProcessedEventRepository processedEvents;
 
@@ -19,12 +24,17 @@ public class ExecutionEventProcessor {
 
     @Transactional
     public ProcessingResult process(ExecutionEvent event) {
-        if (processedEvents.alreadyProcessed(event.eventId())) {
+        validateEvent(event);
+
+        boolean claimed = processedEvents.claim(event.eventId());
+
+        if (!claimed) {
             return ProcessingResult.DUPLICATE;
         }
 
         var existing = positions.findForUpdate(
-                event.portfolioId(), event.assetId()
+                event.portfolioId(),
+                event.assetId()
         );
 
         if (event.side() == ExecutionEvent.Side.BUY) {
@@ -33,7 +43,6 @@ public class ExecutionEventProcessor {
             processSell(event, existing.orElse(null));
         }
 
-        processedEvents.markProcessed(event.eventId());
         return ProcessingResult.APPLIED;
     }
 
@@ -61,10 +70,12 @@ public class ExecutionEventProcessor {
 
     private void processSell(ExecutionEvent event, Position current) {
         if (current == null) {
-            throw new IllegalStateException("Cannot sell an absent position");
+            throw new IllegalStateException(
+                    "Cannot sell an absent position"
+            );
         }
 
-        var result = current.sell(
+        Position.SaleResult result = current.sell(
                 event.quantity(),
                 event.executionPrice(),
                 event.fees(),
@@ -76,6 +87,20 @@ public class ExecutionEventProcessor {
             positions.delete(current);
         } else {
             positions.save(result.remainingPosition());
+        }
+    }
+
+    private void validateEvent(ExecutionEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("Event is required");
+        }
+        if (event.eventId() == null) {
+            throw new IllegalArgumentException("Event ID is required");
+        }
+        if (event.portfolioId() == null || event.assetId() == null) {
+            throw new IllegalArgumentException(
+                    "Portfolio ID and asset ID are required"
+            );
         }
     }
 
