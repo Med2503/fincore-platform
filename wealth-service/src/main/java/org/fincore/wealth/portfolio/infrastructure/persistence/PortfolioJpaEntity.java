@@ -35,7 +35,7 @@ public class PortfolioJpaEntity {
     @Version
     private long version;
 
-    protected PortfolioJpaEntity() {
+    public PortfolioJpaEntity() {
     }
 
     public UUID getId() { return id; }
