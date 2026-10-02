@@ -14,13 +14,16 @@ public class PositionPersistenceMapper {
                 entity.getAssetId(),
                 entity.getQuantity(),
                 entity.getAverageCost(),
-                entity.getCurrency().trim(),
-                entity.getUpdatedAt()
+                entity.getCurrency(),
+                entity.getUpdatedAt(),
+                entity.getLastExecutionSequence()
         );
     }
 
     public PositionJpaEntity toEntity(Position position) {
-        PositionJpaEntity entity = new PositionJpaEntity();
+        PositionJpaEntity entity =
+                new PositionJpaEntity();
+
         entity.setId(position.id());
         entity.setPortfolioId(position.portfolioId());
         entity.setAssetId(position.assetId());
@@ -28,6 +31,10 @@ public class PositionPersistenceMapper {
         entity.setAverageCost(position.averageCost());
         entity.setCurrency(position.currency());
         entity.setUpdatedAt(position.updatedAt());
+        entity.setLastExecutionSequence(
+                position.lastExecutionSequence()
+        );
+
         return entity;
     }
 }

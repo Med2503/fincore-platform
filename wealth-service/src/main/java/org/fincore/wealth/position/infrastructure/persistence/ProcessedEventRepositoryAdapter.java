@@ -1,56 +1,37 @@
 package org.fincore.wealth.position.infrastructure.persistence;
 
-
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
 import java.util.UUID;
 
 @Repository
-public class ProcessedEventRepositoryAdapter implements ProcessedEventRepository {
+public class ProcessedEventRepositoryAdapter
+        implements ProcessedEventRepository {
 
-
-    private final ProcessedEventInsertAdapter insertAdapter;
+    private final JdbcTemplate jdbcTemplate;
 
     public ProcessedEventRepositoryAdapter(
-            ProcessedEventInsertAdapter insertAdapter
+            JdbcTemplate jdbcTemplate
     ) {
-        this.insertAdapter = insertAdapter;
+        this.jdbcTemplate = jdbcTemplate;
     }
-
 
     @Override
     public boolean claim(UUID eventId) {
-        return insertAdapter.insertIfAbsent(eventId);
+        int inserted = jdbcTemplate.update(
+                """
+                INSERT INTO processed_wealth_events (
+                    event_id,
+                    processed_at
+                )
+                VALUES (?, CURRENT_TIMESTAMP)
+                ON CONFLICT (event_id) DO NOTHING
+                """,
+                eventId
+        );
+
+        return inserted == 1;
     }
-
-    /*
-     * en bas la premiére methode on l'as changé car ne vérifie pas existsBy et save n'est pas
-     * atomique bas un bloc de transaction donc en concurrence ca serait difficile  => on
-     * vas check via postgres
-     *
-     * */
-
-
- /*   private final SpringDataProcessedEventRepository repository;
-
-    public ProcessedEventRepositoryAdapter(
-            SpringDataProcessedEventRepository repository
-    ) {
-        this.repository = repository;
-    }
-
-
-    @Override
-    public boolean alreadyProcessed(UUID eventId) {
-        return repository.existsById(eventId);
-    }
-
-    @Override
-    public void markProcessed(UUID eventId) {
-        repository.save(new ProcessedWealthEventJpaEntity(eventId, Instant.now()));
-    }
-    */
-
 }

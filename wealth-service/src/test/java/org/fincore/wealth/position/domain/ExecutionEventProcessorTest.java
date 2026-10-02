@@ -18,8 +18,8 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +36,9 @@ class ExecutionEventProcessorTest {
 
     private ExecutionEventProcessor processor;
 
+    private UUID portfolioId;
+    private UUID assetId;
+
     @BeforeEach
     void setUp() {
         processor = new ExecutionEventProcessor(
@@ -43,11 +46,162 @@ class ExecutionEventProcessorTest {
                 processedEvents,
                 portfolioPositionLock
         );
+
+        portfolioId = UUID.randomUUID();
+        assetId = UUID.randomUUID();
     }
 
     @Test
-    void shouldReturnDuplicateWithoutLockingPortfolio() {
-        ExecutionEvent event = buyEvent();
+    void shouldApplyFirstExecutionSequence() {
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                100L,
+                "10",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.empty());
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertThat(result)
+                .isEqualTo(
+                        ExecutionEventProcessor.ProcessingResult.APPLIED
+                );
+
+        verify(positionRepository)
+                .save(any(Position.class));
+
+        verify(portfolioPositionLock)
+                .lockForPositionUpdate(portfolioId);
+    }
+
+    @Test
+    void shouldApplyHigherExecutionSequence() {
+        Position current = position(
+                100L,
+                "100",
+                "90"
+        );
+
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                101L,
+                "20",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.of(current));
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertThat(result)
+                .isEqualTo(
+                        ExecutionEventProcessor.ProcessingResult.APPLIED
+                );
+
+        verify(positionRepository)
+                .save(any(Position.class));
+    }
+
+    @Test
+    void shouldRejectLowerExecutionSequenceAsOutOfOrder() {
+        Position current = position(
+                100L,
+                "100",
+                "90"
+        );
+
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                99L,
+                "20",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.of(current));
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertThat(result)
+                .isEqualTo(
+                        ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER
+                );
+
+        verify(positionRepository, never())
+                .save(any());
+
+        verify(positionRepository, never())
+                .delete(any());
+    }
+
+    @Test
+    void shouldRejectSameExecutionSequenceAsOutOfOrder() {
+        Position current = position(
+                100L,
+                "100",
+                "90"
+        );
+
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                100L,
+                "20",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.of(current));
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertThat(result)
+                .isEqualTo(
+                        ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER
+                );
+
+        verify(positionRepository, never())
+                .save(any());
+
+        verify(positionRepository, never())
+                .delete(any());
+    }
+
+    @Test
+    void shouldReturnDuplicateWhenEventWasAlreadyClaimed() {
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                101L,
+                "10",
+                "100"
+        );
 
         when(processedEvents.claim(event.eventId()))
                 .thenReturn(false);
@@ -55,35 +209,108 @@ class ExecutionEventProcessorTest {
         ExecutionEventProcessor.ProcessingResult result =
                 processor.process(event);
 
-        assertEquals(
-                ExecutionEventProcessor.ProcessingResult.DUPLICATE,
-                result
-        );
+        assertThat(result)
+                .isEqualTo(
+                        ExecutionEventProcessor.ProcessingResult.DUPLICATE
+                );
 
-        verify(processedEvents).claim(event.eventId());
-        verifyNoInteractions(portfolioPositionLock);
-        verifyNoInteractions(positionRepository);
+        verifyNoInteractions(
+                portfolioPositionLock,
+                positionRepository
+        );
     }
 
     @Test
-    void shouldLockPortfolioBeforeReadingPosition() {
-        ExecutionEvent event = buyEvent();
+    void shouldKeepPositionUnchangedWhenEventIsOutOfOrder() {
+        Position current = position(
+                100L,
+                "100",
+                "90"
+        );
+
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                99L,
+                "50",
+                "200"
+        );
 
         when(processedEvents.claim(event.eventId()))
                 .thenReturn(true);
 
         when(positionRepository.findForUpdate(
-                event.portfolioId(),
-                event.assetId()
-        )).thenReturn(Optional.empty());
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.of(current));
 
         ExecutionEventProcessor.ProcessingResult result =
                 processor.process(event);
 
-        assertEquals(
-                ExecutionEventProcessor.ProcessingResult.APPLIED,
-                result
+        assertThat(result)
+                .isEqualTo(
+                        ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER
+                );
+
+        assertThat(current.quantity())
+                .isEqualByComparingTo("100");
+
+        assertThat(current.averageCost())
+                .isEqualByComparingTo("90");
+
+        assertThat(current.lastExecutionSequence())
+                .isEqualTo(100L);
+
+        verify(positionRepository, never())
+                .save(any());
+
+        verify(positionRepository, never())
+                .delete(any());
+    }
+
+    @Test
+    void shouldRejectEventWithInvalidSequence() {
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                0L,
+                "10",
+                "100"
         );
+
+        assertThatThrownBy(
+                () -> processor.process(event)
+        )
+                .isInstanceOf(
+                        IllegalArgumentException.class
+                )
+                .hasMessage(
+                        "Execution sequence must be positive"
+                );
+
+        verifyNoInteractions(
+                processedEvents,
+                portfolioPositionLock,
+                positionRepository
+        );
+    }
+
+    @Test
+    void shouldClaimBeforeLockingAndLoadingPosition() {
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                101L,
+                "10",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.empty());
+
+        processor.process(event);
 
         InOrder order = inOrder(
                 processedEvents,
@@ -91,71 +318,58 @@ class ExecutionEventProcessorTest {
                 positionRepository
         );
 
-        order.verify(processedEvents).claim(event.eventId());
+        order.verify(processedEvents)
+                .claim(event.eventId());
 
         order.verify(portfolioPositionLock)
-                .lockForPositionUpdate(event.portfolioId());
+                .lockForPositionUpdate(portfolioId);
 
         order.verify(positionRepository)
                 .findForUpdate(
-                        event.portfolioId(),
-                        event.assetId()
+                        portfolioId,
+                        assetId
                 );
-
-        verify(positionRepository).save(any(Position.class));
     }
 
-    @Test
-    void shouldNotLockPortfolioWhenEventIsDuplicate() {
-        ExecutionEvent event = buyEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(false);
-
-        processor.process(event);
-
-        verify(portfolioPositionLock, never())
-                .lockForPositionUpdate(any());
-
-        verify(positionRepository, never())
-                .findForUpdate(any(), any());
-    }
-
-    @Test
-    void shouldNotApplyPositionUpdateWhenPortfolioLockFails() {
-        ExecutionEvent event = buyEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        doThrow(new IllegalStateException("Portfolio lock failed"))
-                .when(portfolioPositionLock)
-                .lockForPositionUpdate(event.portfolioId());
-
-        assertThrows(
-                IllegalStateException.class,
-                () -> processor.process(event)
-        );
-
-        verify(positionRepository, never())
-                .findForUpdate(any(), any());
-
-        verify(positionRepository, never())
-                .save(any());
-    }
-
-    private ExecutionEvent buyEvent() {
+    private ExecutionEvent buyEvent(
+            UUID eventId,
+            long executionSequence,
+            String quantity,
+            String price
+    ) {
         return new ExecutionEvent(
+                eventId,
                 UUID.randomUUID(),
-                UUID.randomUUID(),
-                UUID.randomUUID(),
-                UUID.randomUUID(),
+                portfolioId,
+                assetId,
                 ExecutionEvent.Side.BUY,
-                new BigDecimal("10"),
-                new BigDecimal("125.50"),
-                new BigDecimal("2.00"),
+                new BigDecimal(quantity),
+                new BigDecimal(price),
+                BigDecimal.ZERO,
                 "USD",
-                Instant.parse("2026-10-02T10:00:00Z")
+                Instant.parse(
+                        "2026-10-02T10:00:00Z"
+                ),
+                executionSequence
+        );
+    }
+
+    private Position position(
+            long sequence,
+            String quantity,
+            String averageCost
+    ) {
+        return new Position(
+                UUID.randomUUID(),
+                portfolioId,
+                assetId,
+                new BigDecimal(quantity),
+                new BigDecimal(averageCost),
+                "USD",
+                Instant.parse(
+                        "2026-10-02T09:00:00Z"
+                ),
+                sequence
         );
     }
 }

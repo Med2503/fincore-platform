@@ -3,7 +3,6 @@ package org.fincore.wealth.position.domain;
 import org.fincore.wealth.position.exception.InsufficientPositionQuantityException;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -15,9 +14,9 @@ public record Position(
         BigDecimal quantity,
         BigDecimal averageCost,
         String currency,
-        Instant updatedAt
+        Instant updatedAt,
+        long lastExecutionSequence
 ) {
-    private static final int CALCULATION_SCALE = 16;
 
     public Position {
         Objects.requireNonNull(id);
@@ -28,14 +27,22 @@ public record Position(
         Objects.requireNonNull(currency);
         Objects.requireNonNull(updatedAt);
 
-        if (quantity.signum() <= 0) {
-            throw new IllegalArgumentException("Position quantity must be positive");
+        if (quantity.signum() < 0) {
+            throw new IllegalArgumentException(
+                    "Quantity cannot be negative"
+            );
         }
+
         if (averageCost.signum() < 0) {
-            throw new IllegalArgumentException("Average cost cannot be negative");
+            throw new IllegalArgumentException(
+                    "Average cost cannot be negative"
+            );
         }
-        if (!currency.matches("[A-Z]{3}")) {
-            throw new IllegalArgumentException("Currency must be ISO-like 3-letter code");
+
+        if (lastExecutionSequence < 0) {
+            throw new IllegalArgumentException(
+                    "Execution sequence cannot be negative"
+            );
         }
     }
 
@@ -43,108 +50,180 @@ public record Position(
             UUID portfolioId,
             UUID assetId,
             BigDecimal quantity,
-            BigDecimal price,
+            BigDecimal executionPrice,
             BigDecimal fees,
             String currency,
-            Instant now
+            Instant occurredAt,
+            long executionSequence
     ) {
-        validateTrade(quantity, price, fees);
-
-        BigDecimal totalCost = quantity.multiply(price).add(fees);
-        BigDecimal averageCost = totalCost.divide(
-                quantity, CALCULATION_SCALE, RoundingMode.HALF_EVEN
-        );
+        validatePositive(quantity, "quantity");
+        validateNonNegative(executionPrice, "executionPrice");
+        validateNonNegative(fees, "fees");
 
         return new Position(
                 UUID.randomUUID(),
                 portfolioId,
                 assetId,
                 quantity,
-                averageCost,
-                currency.toUpperCase(),
-                now
+                calculateInitialAverageCost(
+                        quantity,
+                        executionPrice,
+                        fees
+                ),
+                currency,
+                occurredAt,
+                executionSequence
         );
     }
 
     public Position buy(
-            BigDecimal boughtQuantity,
-            BigDecimal price,
+            BigDecimal additionalQuantity,
+            BigDecimal executionPrice,
             BigDecimal fees,
-            String tradeCurrency,
-            Instant now
+            String executionCurrency,
+            Instant occurredAt,
+            long executionSequence
     ) {
-        validateTrade(boughtQuantity, price, fees);
-        requireSameCurrency(tradeCurrency);
+        validatePositive(additionalQuantity, "additionalQuantity");
+        validateNonNegative(executionPrice, "executionPrice");
+        validateNonNegative(fees, "fees");
+        validateCurrency(executionCurrency);
 
-        BigDecimal newQuantity = quantity.add(boughtQuantity);
-        BigDecimal oldCost = quantity.multiply(averageCost);
-        BigDecimal newCost = boughtQuantity.multiply(price).add(fees);
+        BigDecimal existingCost =
+                quantity.multiply(averageCost);
 
-        BigDecimal newAverageCost = oldCost.add(newCost).divide(
-                newQuantity, CALCULATION_SCALE, RoundingMode.HALF_EVEN
-        );
+        BigDecimal additionalCost =
+                additionalQuantity
+                        .multiply(executionPrice)
+                        .add(fees);
+
+        BigDecimal newQuantity =
+                quantity.add(additionalQuantity);
+
+        BigDecimal newAverageCost =
+                existingCost
+                        .add(additionalCost)
+                        .divide(
+                                newQuantity,
+                                10,
+                                java.math.RoundingMode.HALF_UP
+                        );
 
         return new Position(
-                id, portfolioId, assetId, newQuantity,
-                newAverageCost, currency, now
+                id,
+                portfolioId,
+                assetId,
+                newQuantity,
+                newAverageCost,
+                currency,
+                occurredAt,
+                executionSequence
         );
     }
 
     public SaleResult sell(
-            BigDecimal soldQuantity,
-            BigDecimal price,
+            BigDecimal quantityToSell,
+            BigDecimal executionPrice,
             BigDecimal fees,
-            String tradeCurrency,
-            Instant now
+            String executionCurrency,
+            Instant occurredAt,
+            long executionSequence
     ) {
-        validateTrade(soldQuantity, price, fees);
-        requireSameCurrency(tradeCurrency);
+        validatePositive(quantityToSell, "quantityToSell");
+        validateNonNegative(executionPrice, "executionPrice");
+        validateNonNegative(fees, "fees");
+        validateCurrency(executionCurrency);
 
-        if (soldQuantity.compareTo(quantity) > 0) {
-            throw new InsufficientPositionQuantityException("Insuffisant Qauntity");
+        if (quantityToSell.compareTo(quantity) > 0) {
+            throw new InsufficientPositionQuantityException(
+                    quantity
+
+            );
         }
 
-        BigDecimal realizedPnl = price.subtract(averageCost)
-                .multiply(soldQuantity)
-                .subtract(fees);
+        BigDecimal realizedPnl =
+                quantityToSell
+                        .multiply(executionPrice.subtract(averageCost))
+                        .subtract(fees);
 
-        BigDecimal remaining = quantity.subtract(soldQuantity);
+        BigDecimal remainingQuantity =
+                quantity.subtract(quantityToSell);
 
-        Position updated = remaining.signum() == 0
-                ? null
-                : new Position(
-                id, portfolioId, assetId, remaining,
-                averageCost, currency, now
+        if (remainingQuantity.signum() == 0) {
+            return new SaleResult(
+                    null,
+                    realizedPnl,
+                    true
+            );
+        }
+
+        Position remaining = new Position(
+                id,
+                portfolioId,
+                assetId,
+                remainingQuantity,
+                averageCost,
+                currency,
+                occurredAt,
+                executionSequence
         );
 
-        return new SaleResult(updated, realizedPnl);
+        return new SaleResult(
+                remaining,
+                realizedPnl,
+                false
+        );
     }
 
-    private void requireSameCurrency(String tradeCurrency) {
-        if (!currency.equalsIgnoreCase(tradeCurrency)) {
-            throw new IllegalArgumentException("Trade currency mismatch");
-        }
-    }
-
-    private static void validateTrade(
+    private static BigDecimal calculateInitialAverageCost(
             BigDecimal quantity,
-            BigDecimal price,
+            BigDecimal executionPrice,
             BigDecimal fees
     ) {
-        if (quantity == null || quantity.signum() <= 0) {
-            throw new IllegalArgumentException("Quantity must be positive");
-        }
-        if (price == null || price.signum() < 0) {
-            throw new IllegalArgumentException("Price cannot be negative");
-        }
-        if (fees == null || fees.signum() < 0) {
-            throw new IllegalArgumentException("Fees cannot be negative");
+        return quantity
+                .multiply(executionPrice)
+                .add(fees)
+                .divide(
+                        quantity,
+                        10,
+                        java.math.RoundingMode.HALF_UP
+                );
+    }
+
+    private void validateCurrency(String executionCurrency) {
+        if (!currency.equals(executionCurrency)) {
+            throw new IllegalArgumentException(
+                    "Currency mismatch"
+            );
         }
     }
 
-    public record SaleResult(Position remainingPosition, BigDecimal realizedPnl) {
-        public boolean fullyClosed() {
-            return remainingPosition == null;
+    private static void validatePositive(
+            BigDecimal value,
+            String field
+    ) {
+        if (value == null || value.signum() <= 0) {
+            throw new IllegalArgumentException(
+                    field + " must be positive"
+            );
         }
+    }
+
+    private static void validateNonNegative(
+            BigDecimal value,
+            String field
+    ) {
+        if (value == null || value.signum() < 0) {
+            throw new IllegalArgumentException(
+                    field + " cannot be negative"
+            );
+        }
+    }
+
+    public record SaleResult(
+            Position remainingPosition,
+            BigDecimal realizedPnl,
+            boolean fullyClosed
+    ) {
     }
 }

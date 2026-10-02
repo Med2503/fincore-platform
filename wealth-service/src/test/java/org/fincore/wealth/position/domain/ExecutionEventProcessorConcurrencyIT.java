@@ -4,13 +4,18 @@ import org.fincore.wealth.portfolio.domain.PortfolioStatus;
 import org.fincore.wealth.portfolio.infrastructure.persistence.PortfolioJpaEntity;
 import org.fincore.wealth.portfolio.infrastructure.persistence.PortfolioJpaRepository;
 import org.fincore.wealth.position.application.port.PositionRepository;
+import org.fincore.wealth.position.application.port.ProcessedEventRepository;
 import org.fincore.wealth.position.domain.ExecutionEvent;
 import org.fincore.wealth.position.domain.Position;
+import org.fincore.wealth.position.infrastructure.persistence.PositionJpaEntity;
+import org.fincore.wealth.position.infrastructure.persistence.SpringDataPositionRepository;
 import org.fincore.wealth.position.service.ExecutionEventProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -20,16 +25,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Testcontainers
@@ -37,13 +39,12 @@ class ExecutionEventProcessorConcurrencyIT {
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:16-alpine")
-                    .withDatabaseName("wealth_test")
-                    .withUsername("wealth")
-                    .withPassword("wealth");
+            new PostgreSQLContainer<>(
+                    "postgres:16-alpine"
+            );
 
     @DynamicPropertySource
-    static void configureDatabase(
+    static void configureProperties(
             DynamicPropertyRegistry registry
     ) {
         registry.add(
@@ -60,11 +61,6 @@ class ExecutionEventProcessorConcurrencyIT {
                 "spring.datasource.password",
                 POSTGRES::getPassword
         );
-
-        registry.add(
-                "spring.datasource.driver-class-name",
-                POSTGRES::getDriverClassName
-        );
     }
 
     @Autowired
@@ -79,97 +75,36 @@ class ExecutionEventProcessorConcurrencyIT {
     @Autowired
     private PositionRepository positionRepository;
 
+    @Autowired
+    private SpringDataPositionRepository positionJpaRepository;
+
+    @Autowired
+    private ProcessedEventRepository processedEventRepository;
+
     private UUID portfolioId;
     private UUID assetId;
+
+    private ExecutorService executor;
 
     @BeforeEach
     void setUp() {
         portfolioId = UUID.randomUUID();
         assetId = UUID.randomUUID();
 
-        createPortfolio();
-    }
+        executor = Executors.newFixedThreadPool(2);
 
-    @Test
-    void shouldProcessConcurrentBuysIntoSinglePosition()
-            throws Exception {
-
-        ExecutionEvent firstEvent = createBuyEvent(
-                new BigDecimal("10"),
-                new BigDecimal("100")
-        );
-
-        ExecutionEvent secondEvent = createBuyEvent(
-                new BigDecimal("20"),
-                new BigDecimal("110")
-        );
-
-        ExecutorService executor =
-                Executors.newFixedThreadPool(2);
-
-        CountDownLatch start = new CountDownLatch(1);
-
-        Future<?> firstTransaction = executor.submit(
-                () -> processConcurrently(firstEvent, start)
-        );
-
-        Future<?> secondTransaction = executor.submit(
-                () -> processConcurrently(secondEvent, start)
-        );
-
-        start.countDown();
-
-        firstTransaction.get(15, TimeUnit.SECONDS);
-        secondTransaction.get(15, TimeUnit.SECONDS);
-
-        executor.shutdown();
-
-        Optional<Position> position =
-                transactionTemplate.execute(status ->
-                        positionRepository.findForUpdate(
-                                portfolioId,
-                                assetId
-                        )
-                );
-
-        assertTrue(position.isPresent());
-
-        assertEquals(
-                new BigDecimal("30"),
-                position.orElseThrow().quantity()
-        );
-    }
-
-    private void processConcurrently(
-            ExecutionEvent event,
-            CountDownLatch start
-    ) {
-        try {
-            start.await();
-
-            transactionTemplate.executeWithoutResult(
-                    status -> processor.process(event)
-            );
-
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-
-            throw new IllegalStateException(
-                    "Concurrent test interrupted",
-                    exception
-            );
-        }
-    }
-
-    private void createPortfolio() {
         PortfolioJpaEntity portfolio =
                 new PortfolioJpaEntity();
 
         portfolio.setId(portfolioId);
         portfolio.setUserId(UUID.randomUUID());
-        portfolio.setName("Concurrent Test Portfolio");
+        portfolio.setName(
+                "Concurrent Test Portfolio"
+        );
         portfolio.setBaseCurrency("USD");
-        portfolio.setStatus(PortfolioStatus.ACTIVE);
+        portfolio.setStatus(
+                PortfolioStatus.ACTIVE
+        );
 
         Instant now = Instant.now();
 
@@ -179,9 +114,241 @@ class ExecutionEventProcessorConcurrencyIT {
         portfolioRepository.saveAndFlush(portfolio);
     }
 
+    @AfterEach
+    void tearDown() {
+        executor.shutdownNow();
+    }
+
+    @Test
+    void shouldProcessConcurrentBuysIntoSinglePosition()
+            throws Exception {
+
+        ExecutionEvent firstBuy =
+                createBuyEvent(
+                        100L,
+                        "10",
+                        "100"
+                );
+
+        ExecutionEvent secondBuy =
+                createBuyEvent(
+                        101L,
+                        "20",
+                        "110"
+                );
+
+        CountDownLatch start =
+                new CountDownLatch(1);
+
+        Future<?> first =
+                executor.submit(() ->
+                        executeInTransaction(
+                                start,
+                                firstBuy
+                        )
+                );
+
+        Future<?> second =
+                executor.submit(() ->
+                        executeInTransaction(
+                                start,
+                                secondBuy
+                        )
+                );
+
+        start.countDown();
+
+        first.get();
+        second.get();
+
+        Position position =
+                positionRepository
+                        .findForUpdate(
+                                portfolioId,
+                                assetId
+                        )
+                        .orElseThrow();
+
+        assertThat(position.quantity())
+                .isEqualByComparingTo("30");
+
+        assertThat(position.lastExecutionSequence())
+                .isEqualTo(101L);
+    }
+
+    @Test
+    void shouldSerializeConcurrentBuysOnExistingPosition()
+            throws Exception {
+
+        createInitialPosition(
+                "100",
+                "90",
+                99L
+        );
+
+        ExecutionEvent firstBuy =
+                createBuyEvent(
+                        100L,
+                        "10",
+                        "100"
+                );
+
+        ExecutionEvent secondBuy =
+                createBuyEvent(
+                        101L,
+                        "20",
+                        "110"
+                );
+
+        CountDownLatch start =
+                new CountDownLatch(1);
+
+        Future<?> first =
+                executor.submit(() ->
+                        executeInTransaction(
+                                start,
+                                firstBuy
+                        )
+                );
+
+        Future<?> second =
+                executor.submit(() ->
+                        executeInTransaction(
+                                start,
+                                secondBuy
+                        )
+                );
+
+        start.countDown();
+
+        first.get();
+        second.get();
+
+        Position position =
+                positionRepository
+                        .findForUpdate(
+                                portfolioId,
+                                assetId
+                        )
+                        .orElseThrow();
+
+        assertThat(position.quantity())
+                .isEqualByComparingTo("130");
+
+        assertThat(position.lastExecutionSequence())
+                .isEqualTo(101L);
+    }
+
+    @Test
+    void shouldSerializeConcurrentBuyAndSell()
+            throws Exception {
+
+        createInitialPosition(
+                "100",
+                "90",
+                99L
+        );
+
+        ExecutionEvent buy =
+                createBuyEvent(
+                        100L,
+                        "20",
+                        "100"
+                );
+
+        ExecutionEvent sell =
+                createSellEvent(
+                        101L,
+                        "30",
+                        "110"
+                );
+
+        CountDownLatch start =
+                new CountDownLatch(1);
+
+        Future<?> buyFuture =
+                executor.submit(() ->
+                        executeInTransaction(
+                                start,
+                                buy
+                        )
+                );
+
+        Future<?> sellFuture =
+                executor.submit(() ->
+                        executeInTransaction(
+                                start,
+                                sell
+                        )
+                );
+
+        start.countDown();
+
+        buyFuture.get();
+        sellFuture.get();
+
+        Position position =
+                positionRepository
+                        .findForUpdate(
+                                portfolioId,
+                                assetId
+                        )
+                        .orElseThrow();
+
+        assertThat(position.quantity())
+                .isEqualByComparingTo("90");
+
+        assertThat(position.lastExecutionSequence())
+                .isEqualTo(101L);
+    }
+
+    private void executeInTransaction(
+            CountDownLatch start,
+            ExecutionEvent event
+    ) {
+        await(start);
+
+        transactionTemplate.executeWithoutResult(
+                status -> processor.process(event)
+        );
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+
+            throw new IllegalStateException(
+                    "Test thread interrupted",
+                    exception
+            );
+        }
+    }
+
+    private void createInitialPosition(
+            String quantity,
+            String averageCost,
+            long sequence
+    ) {
+        Position position = new Position(
+                UUID.randomUUID(),
+                portfolioId,
+                assetId,
+                new BigDecimal(quantity),
+                new BigDecimal(averageCost),
+                "USD",
+                Instant.now(),
+                sequence
+        );
+
+        positionRepository.save(position);
+    }
+
     private ExecutionEvent createBuyEvent(
-            BigDecimal quantity,
-            BigDecimal price
+            long sequence,
+            String quantity,
+            String price
     ) {
         return new ExecutionEvent(
                 UUID.randomUUID(),
@@ -189,85 +356,19 @@ class ExecutionEventProcessorConcurrencyIT {
                 portfolioId,
                 assetId,
                 ExecutionEvent.Side.BUY,
-                quantity,
-                price,
+                new BigDecimal(quantity),
+                new BigDecimal(price),
                 BigDecimal.ZERO,
                 "USD",
-                Instant.now()
-        );
-    }
-
-    private void createInitialPosition() {
-        Position position = Position.open(
-                portfolioId,
-                assetId,
-                new BigDecimal("100"),
-                new BigDecimal("90"),
-                BigDecimal.ZERO,
-                "USD",
-                Instant.now()
-        );
-
-        transactionTemplate.executeWithoutResult(
-                status -> positionRepository.save(position)
-        );
-    }
-
-    @Test
-    void shouldSerializeConcurrentBuysOnExistingPosition()
-            throws Exception {
-
-        createInitialPosition();
-
-        ExecutionEvent firstEvent = createBuyEvent(
-                new BigDecimal("10"),
-                new BigDecimal("100")
-        );
-
-        ExecutionEvent secondEvent = createBuyEvent(
-                new BigDecimal("20"),
-                new BigDecimal("110")
-        );
-
-        ExecutorService executor =
-                Executors.newFixedThreadPool(2);
-
-        CountDownLatch start = new CountDownLatch(1);
-
-        Future<?> firstTransaction = executor.submit(
-                () -> processConcurrently(firstEvent, start)
-        );
-
-        Future<?> secondTransaction = executor.submit(
-                () -> processConcurrently(secondEvent, start)
-        );
-
-        start.countDown();
-
-        firstTransaction.get(15, TimeUnit.SECONDS);
-        secondTransaction.get(15, TimeUnit.SECONDS);
-
-        executor.shutdown();
-
-        Optional<Position> position =
-                transactionTemplate.execute(status ->
-                        positionRepository.findForUpdate(
-                                portfolioId,
-                                assetId
-                        )
-                );
-
-        assertTrue(position.isPresent());
-
-        assertEquals(
-                new BigDecimal("130"),
-                position.orElseThrow().quantity()
+                Instant.now(),
+                sequence
         );
     }
 
     private ExecutionEvent createSellEvent(
-            BigDecimal quantity,
-            BigDecimal price
+            long sequence,
+            String quantity,
+            String price
     ) {
         return new ExecutionEvent(
                 UUID.randomUUID(),
@@ -275,65 +376,79 @@ class ExecutionEventProcessorConcurrencyIT {
                 portfolioId,
                 assetId,
                 ExecutionEvent.Side.SELL,
-                quantity,
-                price,
+                new BigDecimal(quantity),
+                new BigDecimal(price),
                 BigDecimal.ZERO,
                 "USD",
-                Instant.now()
+                Instant.now(),
+                sequence
         );
     }
-
     @Test
-    void shouldSerializeConcurrentBuyAndSell()
+    void shouldProcessSameEventOnlyOnceConcurrently()
             throws Exception {
 
-        createInitialPosition();
-
-        ExecutionEvent buyEvent = createBuyEvent(
-                new BigDecimal("20"),
-                new BigDecimal("100")
+        ExecutionEvent event = createBuyEvent(
+                100L,
+                "10",
+                "100"
         );
 
-        ExecutionEvent sellEvent = createSellEvent(
-                new BigDecimal("30"),
-                new BigDecimal("110")
-        );
+        CountDownLatch start =
+                new CountDownLatch(1);
 
-        ExecutorService executor =
-                Executors.newFixedThreadPool(2);
+        Future<ExecutionEventProcessor.ProcessingResult> first =
+                executor.submit(() -> {
+                    await(start);
 
-        CountDownLatch start = new CountDownLatch(1);
+                    return transactionTemplate.execute(
+                            status -> processor.process(event)
+                    );
+                });
 
-        Future<?> buyTransaction = executor.submit(
-                () -> processConcurrently(buyEvent, start)
-        );
+        Future<ExecutionEventProcessor.ProcessingResult> second =
+                executor.submit(() -> {
+                    await(start);
 
-        Future<?> sellTransaction = executor.submit(
-                () -> processConcurrently(sellEvent, start)
-        );
+                    return transactionTemplate.execute(
+                            status -> processor.process(event)
+                    );
+                });
 
         start.countDown();
 
-        buyTransaction.get(15, TimeUnit.SECONDS);
-        sellTransaction.get(15, TimeUnit.SECONDS);
+        ExecutionEventProcessor.ProcessingResult firstResult =
+                first.get();
 
-        executor.shutdown();
+        ExecutionEventProcessor.ProcessingResult secondResult =
+                second.get();
 
-        Optional<Position> position =
-                transactionTemplate.execute(status ->
-                        positionRepository.findForUpdate(
+        assertThat(
+                java.util.Set.of(
+                        firstResult,
+                        secondResult
+                )
+        )
+                .containsExactlyInAnyOrder(
+                        ExecutionEventProcessor.ProcessingResult.APPLIED,
+                        ExecutionEventProcessor.ProcessingResult.DUPLICATE
+                );
+
+        Position position =
+                positionRepository
+                        .findForUpdate(
                                 portfolioId,
                                 assetId
                         )
-                );
+                        .orElseThrow();
 
-        assertTrue(position.isPresent());
+        assertThat(position.quantity())
+                .isEqualByComparingTo("10");
 
-        assertEquals(
-                new BigDecimal("90"),
-                position.orElseThrow().quantity()
-        );
+        assertThat(position.lastExecutionSequence())
+                .isEqualTo(100L);
     }
-
-
 }
+
+
+

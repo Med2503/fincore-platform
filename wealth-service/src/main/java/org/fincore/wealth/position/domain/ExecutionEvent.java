@@ -14,8 +14,10 @@ public record ExecutionEvent(
         BigDecimal executionPrice,
         BigDecimal fees,
         String currency,
-        Instant occurredAt
+        Instant occurredAt,
+        long executionSequence
 ) {
+
     public enum Side {
         BUY,
         SELL

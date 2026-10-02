@@ -31,13 +31,16 @@ public class ExecutionEventProcessor {
     public ProcessingResult process(ExecutionEvent event) {
         validateEvent(event);
 
+
         if (!processedEvents.claim(event.eventId())) {
             return ProcessingResult.DUPLICATE;
         }
 
+
         portfolioPositionLock.lockForPositionUpdate(
                 event.portfolioId()
         );
+
 
         Optional<Position> existingPosition =
                 positionRepository.findForUpdate(
@@ -46,6 +49,14 @@ public class ExecutionEventProcessor {
                 );
 
         Position current = existingPosition.orElse(null);
+
+
+        if (current != null
+                && event.executionSequence()
+                <= current.lastExecutionSequence()) {
+
+            return ProcessingResult.OUT_OF_ORDER;
+        }
 
         if (event.side() == ExecutionEvent.Side.BUY) {
             processBuy(event, current);
@@ -60,23 +71,29 @@ public class ExecutionEventProcessor {
             ExecutionEvent event,
             Position current
     ) {
-        Position updated = current == null
-                ? Position.open(
-                event.portfolioId(),
-                event.assetId(),
-                event.quantity(),
-                event.executionPrice(),
-                event.fees(),
-                event.currency(),
-                event.occurredAt()
-        )
-                : current.buy(
-                event.quantity(),
-                event.executionPrice(),
-                event.fees(),
-                event.currency(),
-                event.occurredAt()
-        );
+        Position updated;
+
+        if (current == null) {
+            updated = Position.open(
+                    event.portfolioId(),
+                    event.assetId(),
+                    event.quantity(),
+                    event.executionPrice(),
+                    event.fees(),
+                    event.currency(),
+                    event.occurredAt(),
+                    event.executionSequence()
+            );
+        } else {
+            updated = current.buy(
+                    event.quantity(),
+                    event.executionPrice(),
+                    event.fees(),
+                    event.currency(),
+                    event.occurredAt(),
+                    event.executionSequence()
+            );
+        }
 
         positionRepository.save(updated);
     }
@@ -96,14 +113,18 @@ public class ExecutionEventProcessor {
                 event.executionPrice(),
                 event.fees(),
                 event.currency(),
-                event.occurredAt()
+                event.occurredAt(),
+                event.executionSequence()
         );
 
         if (result.fullyClosed()) {
             positionRepository.delete(current);
-        } else {
-            positionRepository.save(result.remainingPosition());
+            return;
         }
+
+        positionRepository.save(
+                result.remainingPosition()
+        );
     }
 
     private void validateEvent(ExecutionEvent event) {
@@ -119,15 +140,78 @@ public class ExecutionEventProcessor {
             );
         }
 
-        if (event.portfolioId() == null || event.assetId() == null) {
+        if (event.executionId() == null) {
             throw new IllegalArgumentException(
-                    "Portfolio ID and asset ID are required"
+                    "Execution ID is required"
+            );
+        }
+
+        if (event.portfolioId() == null) {
+            throw new IllegalArgumentException(
+                    "Portfolio ID is required"
+            );
+        }
+
+        if (event.assetId() == null) {
+            throw new IllegalArgumentException(
+                    "Asset ID is required"
+            );
+        }
+
+        if (event.side() == null) {
+            throw new IllegalArgumentException(
+                    "Execution side is required"
+            );
+        }
+
+        if (event.quantity() == null
+                || event.quantity().signum() <= 0) {
+
+            throw new IllegalArgumentException(
+                    "Quantity must be positive"
+            );
+        }
+
+        if (event.executionPrice() == null
+                || event.executionPrice().signum() < 0) {
+
+            throw new IllegalArgumentException(
+                    "Execution price cannot be negative"
+            );
+        }
+
+        if (event.fees() == null
+                || event.fees().signum() < 0) {
+
+            throw new IllegalArgumentException(
+                    "Fees cannot be negative"
+            );
+        }
+
+        if (event.currency() == null
+                || event.currency().isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "Currency is required"
+            );
+        }
+
+        if (event.occurredAt() == null) {
+            throw new IllegalArgumentException(
+                    "Occurred at is required"
+            );
+        }
+
+        if (event.executionSequence() <= 0) {
+            throw new IllegalArgumentException(
+                    "Execution sequence must be positive"
             );
         }
     }
 
     public enum ProcessingResult {
         APPLIED,
-        DUPLICATE
+        DUPLICATE,
+        OUT_OF_ORDER
     }
 }
