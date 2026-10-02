@@ -1,13 +1,13 @@
 package org.fincore.wealth.position.domain;
 
 
-import org.fincore.wealth.position.application.port.ExecutionEventProcessor;
+import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
+import org.fincore.wealth.position.service.ExecutionEventProcessor;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
-import org.fincore.wealth.position.domain.ExecutionEvent;
-import org.fincore.wealth.position.domain.Position;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -33,7 +33,8 @@ class ExecutionEventProcessorTest {
     void setUp() {
         positions = mock(PositionRepository.class);
         processedEvents = mock(ProcessedEventRepository.class);
-        processor = new ExecutionEventProcessor(positions, processedEvents);
+        PortfolioPositionLock portfolioPositionLock = mock(PortfolioPositionLock.class);
+        processor = new ExecutionEventProcessor(positions, processedEvents,portfolioPositionLock);
     }
 
     @Test

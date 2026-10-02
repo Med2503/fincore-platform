@@ -35,7 +35,7 @@ public class PositionJpaEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    protected PositionJpaEntity() {
+    public PositionJpaEntity() {
     }
 
     public UUID getId() { return id; }

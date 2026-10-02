@@ -1,6 +1,6 @@
-package org.fincore.wealth.position.application.port;
+package org.fincore.wealth.position.service;
 
-
+import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
 import org.fincore.wealth.position.domain.ExecutionEvent;
@@ -8,45 +8,58 @@ import org.fincore.wealth.position.domain.Position;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 public class ExecutionEventProcessor {
 
-    private final PositionRepository positions;
+    private final PositionRepository positionRepository;
     private final ProcessedEventRepository processedEvents;
+    private final PortfolioPositionLock portfolioPositionLock;
 
     public ExecutionEventProcessor(
-            PositionRepository positions,
-            ProcessedEventRepository processedEvents
+            PositionRepository positionRepository,
+            ProcessedEventRepository processedEvents,
+            PortfolioPositionLock portfolioPositionLock
     ) {
-        this.positions = positions;
+        this.positionRepository = positionRepository;
         this.processedEvents = processedEvents;
+        this.portfolioPositionLock = portfolioPositionLock;
     }
 
     @Transactional
     public ProcessingResult process(ExecutionEvent event) {
         validateEvent(event);
 
-        boolean claimed = processedEvents.claim(event.eventId());
-
-        if (!claimed) {
+        if (!processedEvents.claim(event.eventId())) {
             return ProcessingResult.DUPLICATE;
         }
 
-        var existing = positions.findForUpdate(
-                event.portfolioId(),
-                event.assetId()
+        portfolioPositionLock.lockForPositionUpdate(
+                event.portfolioId()
         );
 
+        Optional<Position> existingPosition =
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                );
+
+        Position current = existingPosition.orElse(null);
+
         if (event.side() == ExecutionEvent.Side.BUY) {
-            processBuy(event, existing.orElse(null));
+            processBuy(event, current);
         } else {
-            processSell(event, existing.orElse(null));
+            processSell(event, current);
         }
 
         return ProcessingResult.APPLIED;
     }
 
-    private void processBuy(ExecutionEvent event, Position current) {
+    private void processBuy(
+            ExecutionEvent event,
+            Position current
+    ) {
         Position updated = current == null
                 ? Position.open(
                 event.portfolioId(),
@@ -65,10 +78,13 @@ public class ExecutionEventProcessor {
                 event.occurredAt()
         );
 
-        positions.save(updated);
+        positionRepository.save(updated);
     }
 
-    private void processSell(ExecutionEvent event, Position current) {
+    private void processSell(
+            ExecutionEvent event,
+            Position current
+    ) {
         if (current == null) {
             throw new IllegalStateException(
                     "Cannot sell an absent position"
@@ -84,19 +100,25 @@ public class ExecutionEventProcessor {
         );
 
         if (result.fullyClosed()) {
-            positions.delete(current);
+            positionRepository.delete(current);
         } else {
-            positions.save(result.remainingPosition());
+            positionRepository.save(result.remainingPosition());
         }
     }
 
     private void validateEvent(ExecutionEvent event) {
         if (event == null) {
-            throw new IllegalArgumentException("Event is required");
+            throw new IllegalArgumentException(
+                    "Event is required"
+            );
         }
+
         if (event.eventId() == null) {
-            throw new IllegalArgumentException("Event ID is required");
+            throw new IllegalArgumentException(
+                    "Event ID is required"
+            );
         }
+
         if (event.portfolioId() == null || event.assetId() == null) {
             throw new IllegalArgumentException(
                     "Portfolio ID and asset ID are required"

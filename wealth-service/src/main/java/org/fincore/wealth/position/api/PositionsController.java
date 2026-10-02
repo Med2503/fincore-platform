@@ -2,7 +2,7 @@ package org.fincore.wealth.position.api;
 
 
 import org.fincore.wealth.position.api.dto.PositionPageResponse;
-import org.fincore.wealth.position.application.port.ListPortfolioPositions;
+import org.fincore.wealth.position.service.ListPortfolioPositions;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;

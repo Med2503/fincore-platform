@@ -1,10 +1,12 @@
-package org.fincore.wealth.position.application.port;
+package org.fincore.wealth.position.service;
 
 import org.fincore.wealth.portfolio.application.exception.PortfolioNotFoundException;
 import org.fincore.wealth.portfolio.domain.PortfolioRepository;
 import org.fincore.wealth.position.api.dto.PositionPageResponse;
 import org.fincore.wealth.position.api.dto.PositionResponse;
 
+import org.fincore.wealth.position.application.port.MarketPriceProvider;
+import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.domain.Position;
 import org.fincore.wealth.position.domain.PositionValuation;
 import org.springframework.data.domain.PageRequest;
