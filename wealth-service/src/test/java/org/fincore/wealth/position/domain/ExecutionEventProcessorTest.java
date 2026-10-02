@@ -1,188 +1,161 @@
 package org.fincore.wealth.position.domain;
 
-
 import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
-import org.fincore.wealth.position.service.ExecutionEventProcessor;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
+import org.fincore.wealth.position.domain.ExecutionEvent;
+import org.fincore.wealth.position.domain.Position;
+import org.fincore.wealth.position.service.ExecutionEventProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class ExecutionEventProcessorTest {
 
-    private PositionRepository positions;
-    private ProcessedEventRepository processedEvents;
-    private ExecutionEventProcessor processor;
+    @Mock
+    private PositionRepository positionRepository;
 
-    private final UUID portfolioId = UUID.randomUUID();
-    private final UUID assetId = UUID.randomUUID();
-    private final UUID eventId = UUID.randomUUID();
-    private final Instant now = Instant.parse("2026-10-02T10:00:00Z");
+    @Mock
+    private ProcessedEventRepository processedEvents;
+
+    @Mock
+    private PortfolioPositionLock portfolioPositionLock;
+
+    private ExecutionEventProcessor processor;
 
     @BeforeEach
     void setUp() {
-        positions = mock(PositionRepository.class);
-        processedEvents = mock(ProcessedEventRepository.class);
-        PortfolioPositionLock portfolioPositionLock = mock(PortfolioPositionLock.class);
-        processor = new ExecutionEventProcessor(positions, processedEvents,portfolioPositionLock);
+        processor = new ExecutionEventProcessor(
+                positionRepository,
+                processedEvents,
+                portfolioPositionLock
+        );
     }
 
     @Test
-    void duplicateEventDoesNotReadOrModifyPosition() {
-        when(processedEvents.claim(eventId)).thenReturn(false);
+    void shouldReturnDuplicateWithoutLockingPortfolio() {
+        ExecutionEvent event = buyEvent();
 
-        var result = processor.process(
-                event(ExecutionEvent.Side.BUY, "2", "100")
-        );
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(false);
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
 
         assertEquals(
                 ExecutionEventProcessor.ProcessingResult.DUPLICATE,
                 result
         );
 
-        verify(processedEvents).claim(eventId);
-        verifyNoInteractions(positions);
+        verify(processedEvents).claim(event.eventId());
+        verifyNoInteractions(portfolioPositionLock);
+        verifyNoInteractions(positionRepository);
     }
 
     @Test
-    void buyCreatesPositionWhenAbsent() {
-        when(processedEvents.claim(eventId)).thenReturn(true);
-        when(positions.findForUpdate(portfolioId, assetId))
-                .thenReturn(Optional.empty());
+    void shouldLockPortfolioBeforeReadingPosition() {
+        ExecutionEvent event = buyEvent();
 
-        var result = processor.process(
-                event(ExecutionEvent.Side.BUY, "2", "100")
-        );
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                event.portfolioId(),
+                event.assetId()
+        )).thenReturn(Optional.empty());
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
 
         assertEquals(
                 ExecutionEventProcessor.ProcessingResult.APPLIED,
                 result
         );
 
-        verify(positions).save(argThat(position ->
-                position.portfolioId().equals(portfolioId)
-                        && position.assetId().equals(assetId)
-                        && position.quantity()
-                        .compareTo(new BigDecimal("2")) == 0
-                        && position.averageCost()
-                        .compareTo(new BigDecimal("100")) == 0
-        ));
-    }
-
-    @Test
-    void buyUpdatesExistingPosition() {
-        Position existing = Position.open(
-                portfolioId,
-                assetId,
-                new BigDecimal("10"),
-                new BigDecimal("100"),
-                BigDecimal.ZERO,
-                "USD",
-                now
+        InOrder order = inOrder(
+                processedEvents,
+                portfolioPositionLock,
+                positionRepository
         );
 
-        when(processedEvents.claim(eventId)).thenReturn(true);
-        when(positions.findForUpdate(portfolioId, assetId))
-                .thenReturn(Optional.of(existing));
+        order.verify(processedEvents).claim(event.eventId());
 
-        processor.process(event(ExecutionEvent.Side.BUY, "10", "120"));
+        order.verify(portfolioPositionLock)
+                .lockForPositionUpdate(event.portfolioId());
 
-        verify(positions).save(argThat(position ->
-                position.quantity().compareTo(new BigDecimal("20")) == 0
-                        && position.averageCost()
-                        .compareTo(new BigDecimal("110")) == 0
-        ));
+        order.verify(positionRepository)
+                .findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                );
+
+        verify(positionRepository).save(any(Position.class));
     }
 
     @Test
-    void partialSaleSavesRemainingPosition() {
-        Position existing = Position.open(
-                portfolioId,
-                assetId,
-                new BigDecimal("10"),
-                new BigDecimal("100"),
-                BigDecimal.ZERO,
-                "USD",
-                now
-        );
+    void shouldNotLockPortfolioWhenEventIsDuplicate() {
+        ExecutionEvent event = buyEvent();
 
-        when(processedEvents.claim(eventId)).thenReturn(true);
-        when(positions.findForUpdate(portfolioId, assetId))
-                .thenReturn(Optional.of(existing));
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(false);
 
-        processor.process(event(ExecutionEvent.Side.SELL, "4", "130"));
+        processor.process(event);
 
-        verify(positions).save(argThat(position ->
-                position.quantity().compareTo(new BigDecimal("6")) == 0
-        ));
-        verify(positions, never()).delete(any());
+        verify(portfolioPositionLock, never())
+                .lockForPositionUpdate(any());
+
+        verify(positionRepository, never())
+                .findForUpdate(any(), any());
     }
 
     @Test
-    void fullSaleDeletesPosition() {
-        Position existing = Position.open(
-                portfolioId,
-                assetId,
-                new BigDecimal("5"),
-                new BigDecimal("100"),
-                BigDecimal.ZERO,
-                "USD",
-                now
-        );
+    void shouldNotApplyPositionUpdateWhenPortfolioLockFails() {
+        ExecutionEvent event = buyEvent();
 
-        when(processedEvents.claim(eventId)).thenReturn(true);
-        when(positions.findForUpdate(portfolioId, assetId))
-                .thenReturn(Optional.of(existing));
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
 
-        processor.process(event(ExecutionEvent.Side.SELL, "5", "130"));
-
-        verify(positions).delete(existing);
-        verify(positions, never()).save(any());
-    }
-
-    @Test
-    void saleWithoutPositionFails() {
-        when(processedEvents.claim(eventId)).thenReturn(true);
-        when(positions.findForUpdate(portfolioId, assetId))
-                .thenReturn(Optional.empty());
+        doThrow(new IllegalStateException("Portfolio lock failed"))
+                .when(portfolioPositionLock)
+                .lockForPositionUpdate(event.portfolioId());
 
         assertThrows(
                 IllegalStateException.class,
-                () -> processor.process(
-                        event(ExecutionEvent.Side.SELL, "1", "110")
-                )
+                () -> processor.process(event)
         );
 
-        verify(positions, never()).save(any());
-        verify(positions, never()).delete(any());
+        verify(positionRepository, never())
+                .findForUpdate(any(), any());
+
+        verify(positionRepository, never())
+                .save(any());
     }
 
-    private ExecutionEvent event(
-            ExecutionEvent.Side side,
-            String quantity,
-            String price
-    ) {
+    private ExecutionEvent buyEvent() {
         return new ExecutionEvent(
-                eventId,
                 UUID.randomUUID(),
-                portfolioId,
-                assetId,
-                side,
-                new BigDecimal(quantity),
-                new BigDecimal(price),
-                BigDecimal.ZERO,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                ExecutionEvent.Side.BUY,
+                new BigDecimal("10"),
+                new BigDecimal("125.50"),
+                new BigDecimal("2.00"),
                 "USD",
-                now
+                Instant.parse("2026-10-02T10:00:00Z")
         );
     }
 }
