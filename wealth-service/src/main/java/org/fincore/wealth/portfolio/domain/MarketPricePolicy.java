@@ -1,6 +1,7 @@
 package org.fincore.wealth.portfolio.domain;
 
-import org.fincore.wealth.position.application.port.MarketPriceProvider;
+
+import org.fincore.wealth.position.domain.MarketPrice;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -17,7 +18,7 @@ public class MarketPricePolicy {
     }
 
     public boolean isFresh(
-            MarketPriceProvider.MarketPrice price,
+            MarketPrice price,
             Instant now
     ) {
         if (price == null || price.observedAt() == null) {

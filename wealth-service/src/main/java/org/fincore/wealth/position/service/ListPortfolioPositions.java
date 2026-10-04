@@ -4,9 +4,9 @@ import org.fincore.wealth.portfolio.application.exception.PortfolioNotFoundExcep
 import org.fincore.wealth.portfolio.domain.PortfolioRepository;
 import org.fincore.wealth.position.api.dto.PositionPageResponse;
 import org.fincore.wealth.position.api.dto.PositionResponse;
-
 import org.fincore.wealth.position.application.port.MarketPriceProvider;
 import org.fincore.wealth.position.application.port.PositionRepository;
+import org.fincore.wealth.position.domain.MarketPrice;
 import org.fincore.wealth.position.domain.Position;
 import org.fincore.wealth.position.domain.PositionValuation;
 import org.springframework.data.domain.PageRequest;
@@ -14,10 +14,15 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class ListPortfolioPositions {
+
     private final PortfolioRepository portfolios;
     private final PositionRepository positions;
     private final MarketPriceProvider prices;
@@ -39,23 +44,38 @@ public class ListPortfolioPositions {
             int page,
             int size
     ) {
-        if (page < 0 || size < 1 || size > 100) {
-            throw new IllegalArgumentException("Invalid pagination parameters");
-        }
+        validatePagination(page, size);
 
         portfolios.findOwnedById(portfolioId, userId)
-                .orElseThrow(() -> new PortfolioNotFoundException("not found"));
+                .orElseThrow(() ->
+                        new PortfolioNotFoundException("not found")
+                );
 
         var pageable = PageRequest.of(
                 page,
                 size,
-                Sort.by(Sort.Direction.ASC, "assetId")
+                Sort.by(
+                        Sort.Direction.ASC,
+                        "assetId"
+                )
         );
 
-        var results = positions.findAllByPortfolioId(portfolioId, pageable);
+        var results =
+                positions.findAllByPortfolioId(
+                        portfolioId,
+                        pageable
+                );
+
+        Map<UUID, MarketPrice> marketPrices =
+                loadMarketPrices(results);
 
         var responses = results.stream()
-                .map(this::toResponse)
+                .map(position ->
+                        toResponse(
+                                position,
+                                marketPrices
+                        )
+                )
                 .toList();
 
         return new PositionPageResponse(
@@ -66,31 +86,37 @@ public class ListPortfolioPositions {
         );
     }
 
-    private PositionResponse toResponse(Position position) {
-        var quote = prices.findLatestPrice(position.assetId());
-
-        if (quote.isEmpty()) {
-            return new PositionResponse(
-                    position.assetId(),
-                    position.quantity(),
-                    position.averageCost(),
-                    position.currency(),
-                    null, null, null, null, null,
-                    false
-            );
+    private Map<UUID, MarketPrice> loadMarketPrices(
+            java.util.List<Position> positions
+    ) {
+        if (positions.isEmpty()) {
+            return Map.of();
         }
 
-        var marketPrice = quote.get();
+        Set<UUID> assetIds = positions.stream()
+                .map(Position::assetId)
+                .collect(Collectors.toSet());
 
-        if (!position.currency().equalsIgnoreCase(marketPrice.currency())) {
-            return new PositionResponse(
-                    position.assetId(),
-                    position.quantity(),
-                    position.averageCost(),
-                    position.currency(),
-                    null, null, null, null,
-                    marketPrice.observedAt(),
-                    false
+        return prices.findLatestPrices(assetIds);
+    }
+
+    private PositionResponse toResponse(
+            Position position,
+            Map<UUID, MarketPrice> marketPrices
+    ) {
+        MarketPrice marketPrice =
+                marketPrices.get(position.assetId());
+
+        if (marketPrice == null) {
+            return unavailableResponse(position, null);
+        }
+
+        if (!position.currency()
+                .equalsIgnoreCase(marketPrice.currency())) {
+
+            return unavailableResponse(
+                    position,
+                    marketPrice
             );
         }
 
@@ -111,5 +137,36 @@ public class ListPortfolioPositions {
                 marketPrice.observedAt(),
                 true
         );
+    }
+
+    private PositionResponse unavailableResponse(
+            Position position,
+            MarketPrice marketPrice
+    ) {
+        return new PositionResponse(
+                position.assetId(),
+                position.quantity(),
+                position.averageCost(),
+                position.currency(),
+                null,
+                null,
+                null,
+                null,
+                marketPrice == null
+                        ? null
+                        : marketPrice.observedAt(),
+                false
+        );
+    }
+
+    private void validatePagination(
+            int page,
+            int size
+    ) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException(
+                    "Invalid pagination parameters"
+            );
+        }
     }
 }

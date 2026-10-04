@@ -3,6 +3,7 @@ package org.fincore.wealth.portfolio.domain;
 
 import org.fincore.wealth.portfolio.domain.MarketPricePolicy;
 import org.fincore.wealth.position.application.port.MarketPriceProvider;
+import org.fincore.wealth.position.domain.MarketPrice;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -19,7 +20,7 @@ class MarketPricePolicyTest {
         var policy = new MarketPricePolicy(Duration.ofMinutes(15));
         Instant now = Instant.parse("2026-10-02T10:15:00Z");
 
-        var price = new MarketPriceProvider.MarketPrice(
+        var price = new MarketPrice(
                 UUID.randomUUID(),
                 new BigDecimal("120.50"),
                 "USD",
@@ -34,14 +35,14 @@ class MarketPricePolicyTest {
         var policy = new MarketPricePolicy(Duration.ofMinutes(15));
         Instant now = Instant.parse("2026-10-02T10:15:00Z");
 
-        var stale = new MarketPriceProvider.MarketPrice(
+        var stale = new MarketPrice(
                 UUID.randomUUID(),
                 new BigDecimal("120.50"),
                 "USD",
                 now.minus(Duration.ofMinutes(20))
         );
 
-        var future = new MarketPriceProvider.MarketPrice(
+        var future = new MarketPrice(
                 UUID.randomUUID(),
                 new BigDecimal("120.50"),
                 "USD",

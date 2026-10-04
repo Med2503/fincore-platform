@@ -1,6 +1,7 @@
 package org.fincore.wealth.config;
 
-import org.fincore.wealth.position.application.MarketPricePolicy;
+
+import org.fincore.wealth.portfolio.domain.MarketPricePolicy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 

@@ -1,12 +1,21 @@
-/*
 package org.fincore.wealth.portfolio.infrastructure.persistence;
 
 
 import org.fincore.wealth.portfolio.domain.Portfolio;
 import org.fincore.wealth.portfolio.domain.PortfolioRepository;
 import org.fincore.wealth.portfolio.domain.PortfolioStatus;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -62,7 +71,7 @@ class PortfolioRepositoryAdapterIntegrationTest {
     private PortfolioRepository repository;
 
     @Autowired
-    private SpringDataPortfolioRepository springDataRepository;
+    private PortfolioJpaRepository springDataRepository;
 
     @BeforeEach
     void cleanDatabase() {
@@ -77,7 +86,8 @@ class PortfolioRepositoryAdapterIntegrationTest {
                 UUID.randomUUID(),
                 userId,
                 "Long Term Portfolio",
-                "EUR"
+                "EUR",
+                Instant.now()
         );
 
         Portfolio saved = repository.save(portfolio);
@@ -117,7 +127,8 @@ class PortfolioRepositoryAdapterIntegrationTest {
                 UUID.randomUUID(),
                 ownerId,
                 "Private Portfolio",
-                "EUR"
+                "EUR",
+                Instant.now()
         );
 
         Portfolio saved = repository.save(portfolio);
@@ -139,14 +150,16 @@ class PortfolioRepositoryAdapterIntegrationTest {
                 UUID.randomUUID(),
                 userId,
                 "Portfolio One",
-                "EUR"
+                "EUR",
+                Instant.now()
         );
 
         Portfolio second = Portfolio.create(
                 UUID.randomUUID(),
                 userId,
                 "Portfolio Two",
-                "USD"
+                "USD",
+                Instant.now()
         );
 
         repository.save(first);
@@ -181,7 +194,8 @@ class PortfolioRepositoryAdapterIntegrationTest {
                 UUID.randomUUID(),
                 existingUserId,
                 "Portfolio",
-                "EUR"
+                "EUR",
+                Instant.now()
         );
 
         repository.save(portfolio);
@@ -198,4 +212,4 @@ class PortfolioRepositoryAdapterIntegrationTest {
         assertThat(result.getTotalElements())
                 .isZero();
     }
-}*/
+}
