@@ -1,10 +1,14 @@
 package org.fincore.wealth.position.domain;
 
+
 import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
+import org.fincore.wealth.position.application.event.PositionOutboxEventFactory;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
 import org.fincore.wealth.position.domain.ExecutionEvent;
 import org.fincore.wealth.position.domain.Position;
+import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
+import org.fincore.wealth.position.outbox.domain.OutboxEvent;
 import org.fincore.wealth.position.service.ExecutionEventProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +38,12 @@ class ExecutionEventProcessorTest {
     @Mock
     private PortfolioPositionLock portfolioPositionLock;
 
+    @Mock
+    private OutboxEventRepository outboxEvents;
+
+    @Mock
+    private PositionOutboxEventFactory outboxEventFactory;
+
     private ExecutionEventProcessor processor;
 
     private UUID portfolioId;
@@ -44,7 +54,9 @@ class ExecutionEventProcessorTest {
         processor = new ExecutionEventProcessor(
                 positionRepository,
                 processedEvents,
-                portfolioPositionLock
+                portfolioPositionLock,
+                outboxEvents,
+                outboxEventFactory
         );
 
         portfolioId = UUID.randomUUID();
@@ -52,13 +64,21 @@ class ExecutionEventProcessorTest {
     }
 
     @Test
-    void shouldApplyFirstExecutionSequence() {
+    void shouldApplyFirstExecutionAndCreateOutboxEvent() {
         ExecutionEvent event = buyEvent(
                 UUID.randomUUID(),
                 100L,
                 "10",
                 "100"
         );
+
+        Position savedPosition = position(
+                100L,
+                "10",
+                "100"
+        );
+
+        OutboxEvent outboxEvent = outboxEvent();
 
         when(processedEvents.claim(event.eventId()))
                 .thenReturn(true);
@@ -68,6 +88,12 @@ class ExecutionEventProcessorTest {
                 assetId
         )).thenReturn(Optional.empty());
 
+        when(positionRepository.save(any(Position.class)))
+                .thenReturn(savedPosition);
+
+        when(outboxEventFactory.create(savedPosition))
+                .thenReturn(outboxEvent);
+
         ExecutionEventProcessor.ProcessingResult result =
                 processor.process(event);
 
@@ -79,16 +105,28 @@ class ExecutionEventProcessorTest {
         verify(positionRepository)
                 .save(any(Position.class));
 
+        verify(outboxEventFactory)
+                .create(savedPosition);
+
+        verify(outboxEvents)
+                .save(outboxEvent);
+
         verify(portfolioPositionLock)
                 .lockForPositionUpdate(portfolioId);
     }
 
     @Test
-    void shouldApplyHigherExecutionSequence() {
+    void shouldApplyHigherExecutionSequenceAndCreateOutboxEvent() {
         Position current = position(
                 100L,
                 "100",
                 "90"
+        );
+
+        Position updated = position(
+                101L,
+                "120",
+                "91.6666666667"
         );
 
         ExecutionEvent event = buyEvent(
@@ -98,6 +136,8 @@ class ExecutionEventProcessorTest {
                 "100"
         );
 
+        OutboxEvent outboxEvent = outboxEvent();
+
         when(processedEvents.claim(event.eventId()))
                 .thenReturn(true);
 
@@ -105,6 +145,12 @@ class ExecutionEventProcessorTest {
                 portfolioId,
                 assetId
         )).thenReturn(Optional.of(current));
+
+        when(positionRepository.save(any(Position.class)))
+                .thenReturn(updated);
+
+        when(outboxEventFactory.create(updated))
+                .thenReturn(outboxEvent);
 
         ExecutionEventProcessor.ProcessingResult result =
                 processor.process(event);
@@ -116,6 +162,12 @@ class ExecutionEventProcessorTest {
 
         verify(positionRepository)
                 .save(any(Position.class));
+
+        verify(outboxEventFactory)
+                .create(any(Position.class));
+
+        verify(outboxEvents)
+                .save(outboxEvent);
     }
 
     @Test
@@ -154,6 +206,11 @@ class ExecutionEventProcessorTest {
 
         verify(positionRepository, never())
                 .delete(any());
+
+        verifyNoInteractions(
+                outboxEvents,
+                outboxEventFactory
+        );
     }
 
     @Test
@@ -192,6 +249,11 @@ class ExecutionEventProcessorTest {
 
         verify(positionRepository, never())
                 .delete(any());
+
+        verifyNoInteractions(
+                outboxEvents,
+                outboxEventFactory
+        );
     }
 
     @Test
@@ -216,7 +278,9 @@ class ExecutionEventProcessorTest {
 
         verifyNoInteractions(
                 portfolioPositionLock,
-                positionRepository
+                positionRepository,
+                outboxEvents,
+                outboxEventFactory
         );
     }
 
@@ -265,6 +329,11 @@ class ExecutionEventProcessorTest {
 
         verify(positionRepository, never())
                 .delete(any());
+
+        verifyNoInteractions(
+                outboxEvents,
+                outboxEventFactory
+        );
     }
 
     @Test
@@ -279,9 +348,7 @@ class ExecutionEventProcessorTest {
         assertThatThrownBy(
                 () -> processor.process(event)
         )
-                .isInstanceOf(
-                        IllegalArgumentException.class
-                )
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Execution sequence must be positive"
                 );
@@ -289,7 +356,9 @@ class ExecutionEventProcessorTest {
         verifyNoInteractions(
                 processedEvents,
                 portfolioPositionLock,
-                positionRepository
+                positionRepository,
+                outboxEvents,
+                outboxEventFactory
         );
     }
 
@@ -302,6 +371,14 @@ class ExecutionEventProcessorTest {
                 "100"
         );
 
+        Position savedPosition = position(
+                101L,
+                "10",
+                "100"
+        );
+
+        OutboxEvent outboxEvent = outboxEvent();
+
         when(processedEvents.claim(event.eventId()))
                 .thenReturn(true);
 
@@ -310,12 +387,20 @@ class ExecutionEventProcessorTest {
                 assetId
         )).thenReturn(Optional.empty());
 
+        when(positionRepository.save(any(Position.class)))
+                .thenReturn(savedPosition);
+
+        when(outboxEventFactory.create(savedPosition))
+                .thenReturn(outboxEvent);
+
         processor.process(event);
 
         InOrder order = inOrder(
                 processedEvents,
                 portfolioPositionLock,
-                positionRepository
+                positionRepository,
+                outboxEventFactory,
+                outboxEvents
         );
 
         order.verify(processedEvents)
@@ -329,6 +414,106 @@ class ExecutionEventProcessorTest {
                         portfolioId,
                         assetId
                 );
+
+        order.verify(positionRepository)
+                .save(any(Position.class));
+
+        order.verify(outboxEventFactory)
+                .create(savedPosition);
+
+        order.verify(outboxEvents)
+                .save(outboxEvent);
+    }
+
+    @Test
+    void shouldCreateOutboxFromTheUpdatedPosition() {
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                100L,
+                "10",
+                "100"
+        );
+
+        Position savedPosition = position(
+                100L,
+                "10",
+                "100"
+        );
+
+        OutboxEvent outboxEvent = outboxEvent();
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.empty());
+
+        when(positionRepository.save(any(Position.class)))
+                .thenReturn(savedPosition);
+
+        when(outboxEventFactory.create(savedPosition))
+                .thenReturn(outboxEvent);
+
+        processor.process(event);
+
+        verify(outboxEventFactory)
+                .create(savedPosition);
+
+        verify(outboxEvents)
+                .save(outboxEvent);
+    }
+
+    @Test
+    void shouldNotCreateOutboxWhenEventIsDuplicate() {
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                100L,
+                "10",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(false);
+
+        processor.process(event);
+
+        verifyNoInteractions(
+                outboxEvents,
+                outboxEventFactory
+        );
+    }
+
+    @Test
+    void shouldNotCreateOutboxWhenEventIsOutOfOrder() {
+        Position current = position(
+                100L,
+                "10",
+                "100"
+        );
+
+        ExecutionEvent event = buyEvent(
+                UUID.randomUUID(),
+                99L,
+                "10",
+                "100"
+        );
+
+        when(processedEvents.claim(event.eventId()))
+                .thenReturn(true);
+
+        when(positionRepository.findForUpdate(
+                portfolioId,
+                assetId
+        )).thenReturn(Optional.of(current));
+
+        processor.process(event);
+
+        verifyNoInteractions(
+                outboxEvents,
+                outboxEventFactory
+        );
     }
 
     private ExecutionEvent buyEvent(
@@ -370,6 +555,15 @@ class ExecutionEventProcessorTest {
                         "2026-10-02T09:00:00Z"
                 ),
                 sequence
+        );
+    }
+
+    private OutboxEvent outboxEvent() {
+        return OutboxEvent.pending(
+                portfolioId,
+                "PositionUpdated",
+                "{\"eventId\":\"" + UUID.randomUUID() + "\"}",
+                Instant.parse("2026-10-02T10:00:00Z")
         );
     }
 }
