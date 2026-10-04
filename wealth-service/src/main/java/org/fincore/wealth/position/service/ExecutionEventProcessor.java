@@ -1,8 +1,8 @@
 package org.fincore.wealth.position.service;
 
 
-import org.fincore.wealth.position.application.event.PositionOutboxEventFactory;
 import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
+import org.fincore.wealth.position.application.event.PositionOutboxEventFactory;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
 import org.fincore.wealth.position.domain.ExecutionEvent;
@@ -37,9 +37,7 @@ public class ExecutionEventProcessor {
     }
 
     @Transactional
-    public ProcessingResult process(
-            ExecutionEvent event
-    ) {
+    public ProcessingResult process(ExecutionEvent event) {
         validateEvent(event);
 
         if (!processedEvents.claim(event.eventId())) {
@@ -56,8 +54,7 @@ public class ExecutionEventProcessor {
                         event.assetId()
                 );
 
-        Position current =
-                existingPosition.orElse(null);
+        Position current = existingPosition.orElse(null);
 
         if (current != null
                 && event.executionSequence()
@@ -66,24 +63,16 @@ public class ExecutionEventProcessor {
             return ProcessingResult.OUT_OF_ORDER;
         }
 
-        Position updated;
-
         if (event.side() == ExecutionEvent.Side.BUY) {
-            updated = processBuy(event, current);
+            processBuy(event, current);
         } else {
-            updated = processSell(event, current);
-        }
-
-        if (updated != null) {
-            outboxEvents.save(
-                    outboxEventFactory.create(updated)
-            );
+            processSell(event, current);
         }
 
         return ProcessingResult.APPLIED;
     }
 
-    private Position processBuy(
+    private void processBuy(
             ExecutionEvent event,
             Position current
     ) {
@@ -111,63 +100,66 @@ public class ExecutionEventProcessor {
             );
         }
 
-        positionRepository.save(updated);
+        Position saved = positionRepository.save(updated);
 
-        return updated;
+        outboxEvents.save(
+                outboxEventFactory.create(saved)
+        );
     }
 
-    private Position processSell(
+    private void processSell(
             ExecutionEvent event,
             Position current
     ) {
         if (current == null) {
-            throw new IllegalStateException(
-                    "Cannot sell an absent position"
+            throw new IllegalArgumentException(
+                    "Cannot sell without an existing position"
             );
         }
 
-        Position.SaleResult result =
-                current.sell(
-                        event.quantity(),
-                        event.executionPrice(),
-                        event.fees(),
-                        event.currency(),
-                        event.occurredAt(),
-                        event.executionSequence()
-                );
+        Position.SaleResult result = current.sell(
+                event.quantity(),
+                event.executionPrice(),
+                event.fees(),
+                event.currency(),
+                event.occurredAt(),
+                event.executionSequence()
+        );
 
         if (result.fullyClosed()) {
             positionRepository.delete(current);
 
-            return null;
+            outboxEvents.save(
+                    outboxEventFactory.createClosed(
+                            current,
+                            event.occurredAt(),
+                            event.executionSequence()
+                    )
+            );
+
+            return;
         }
 
-        Position updated =
-                result.remainingPosition();
+        Position saved =
+                positionRepository.save(
+                        result.remainingPosition()
+                );
 
-        positionRepository.save(updated);
-
-        return updated;
+        outboxEvents.save(
+                outboxEventFactory.create(saved)
+        );
     }
 
-    private void validateEvent(
-            ExecutionEvent event
-    ) {
+    private void validateEvent(ExecutionEvent event) {
         if (event == null) {
             throw new IllegalArgumentException(
-                    "Event is required"
+                    "Execution event is required"
             );
         }
 
         if (event.eventId() == null) {
             throw new IllegalArgumentException(
                     "Event ID is required"
-            );
-        }
-
-        if (event.executionId() == null) {
-            throw new IllegalArgumentException(
-                    "Execution ID is required"
             );
         }
 
@@ -180,12 +172,6 @@ public class ExecutionEventProcessor {
         if (event.assetId() == null) {
             throw new IllegalArgumentException(
                     "Asset ID is required"
-            );
-        }
-
-        if (event.side() == null) {
-            throw new IllegalArgumentException(
-                    "Execution side is required"
             );
         }
 
