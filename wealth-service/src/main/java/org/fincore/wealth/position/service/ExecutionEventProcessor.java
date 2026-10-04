@@ -1,10 +1,13 @@
 package org.fincore.wealth.position.service;
 
+
+import org.fincore.wealth.position.application.event.PositionOutboxEventFactory;
 import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
 import org.fincore.wealth.position.domain.ExecutionEvent;
 import org.fincore.wealth.position.domain.Position;
+import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,31 +19,36 @@ public class ExecutionEventProcessor {
     private final PositionRepository positionRepository;
     private final ProcessedEventRepository processedEvents;
     private final PortfolioPositionLock portfolioPositionLock;
+    private final OutboxEventRepository outboxEvents;
+    private final PositionOutboxEventFactory outboxEventFactory;
 
     public ExecutionEventProcessor(
             PositionRepository positionRepository,
             ProcessedEventRepository processedEvents,
-            PortfolioPositionLock portfolioPositionLock
+            PortfolioPositionLock portfolioPositionLock,
+            OutboxEventRepository outboxEvents,
+            PositionOutboxEventFactory outboxEventFactory
     ) {
         this.positionRepository = positionRepository;
         this.processedEvents = processedEvents;
         this.portfolioPositionLock = portfolioPositionLock;
+        this.outboxEvents = outboxEvents;
+        this.outboxEventFactory = outboxEventFactory;
     }
 
     @Transactional
-    public ProcessingResult process(ExecutionEvent event) {
+    public ProcessingResult process(
+            ExecutionEvent event
+    ) {
         validateEvent(event);
-
 
         if (!processedEvents.claim(event.eventId())) {
             return ProcessingResult.DUPLICATE;
         }
 
-
         portfolioPositionLock.lockForPositionUpdate(
                 event.portfolioId()
         );
-
 
         Optional<Position> existingPosition =
                 positionRepository.findForUpdate(
@@ -48,8 +56,8 @@ public class ExecutionEventProcessor {
                         event.assetId()
                 );
 
-        Position current = existingPosition.orElse(null);
-
+        Position current =
+                existingPosition.orElse(null);
 
         if (current != null
                 && event.executionSequence()
@@ -58,16 +66,24 @@ public class ExecutionEventProcessor {
             return ProcessingResult.OUT_OF_ORDER;
         }
 
+        Position updated;
+
         if (event.side() == ExecutionEvent.Side.BUY) {
-            processBuy(event, current);
+            updated = processBuy(event, current);
         } else {
-            processSell(event, current);
+            updated = processSell(event, current);
+        }
+
+        if (updated != null) {
+            outboxEvents.save(
+                    outboxEventFactory.create(updated)
+            );
         }
 
         return ProcessingResult.APPLIED;
     }
 
-    private void processBuy(
+    private Position processBuy(
             ExecutionEvent event,
             Position current
     ) {
@@ -96,9 +112,11 @@ public class ExecutionEventProcessor {
         }
 
         positionRepository.save(updated);
+
+        return updated;
     }
 
-    private void processSell(
+    private Position processSell(
             ExecutionEvent event,
             Position current
     ) {
@@ -108,26 +126,33 @@ public class ExecutionEventProcessor {
             );
         }
 
-        Position.SaleResult result = current.sell(
-                event.quantity(),
-                event.executionPrice(),
-                event.fees(),
-                event.currency(),
-                event.occurredAt(),
-                event.executionSequence()
-        );
+        Position.SaleResult result =
+                current.sell(
+                        event.quantity(),
+                        event.executionPrice(),
+                        event.fees(),
+                        event.currency(),
+                        event.occurredAt(),
+                        event.executionSequence()
+                );
 
         if (result.fullyClosed()) {
             positionRepository.delete(current);
-            return;
+
+            return null;
         }
 
-        positionRepository.save(
-                result.remainingPosition()
-        );
+        Position updated =
+                result.remainingPosition();
+
+        positionRepository.save(updated);
+
+        return updated;
     }
 
-    private void validateEvent(ExecutionEvent event) {
+    private void validateEvent(
+            ExecutionEvent event
+    ) {
         if (event == null) {
             throw new IllegalArgumentException(
                     "Event is required"
