@@ -1,7 +1,7 @@
 package org.fincore.wealth.portfolio.application.service;
 
 import org.fincore.wealth.portfolio.application.exception.PortfolioNotFoundException;
-import org.fincore.wealth.portfolio.domain.MarketPricePolicy;
+import org.fincore.wealth.position.service.MarketPricePolicy;
 import org.fincore.wealth.portfolio.domain.PortfolioRepository;
 
 import org.fincore.wealth.portfolio.domain.PortfolioSummary;

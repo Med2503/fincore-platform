@@ -1,7 +1,7 @@
 package org.fincore.wealth.config;
 
 
-import org.fincore.wealth.portfolio.domain.MarketPricePolicy;
+import org.fincore.wealth.position.service.MarketPricePolicy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -16,8 +16,5 @@ public class WealthTimeConfiguration {
         return Clock.systemUTC();
     }
 
-    @Bean
-    MarketPricePolicy marketPricePolicy() {
-        return new MarketPricePolicy(Duration.ofMinutes(15));
-    }
+
 }

@@ -26,3 +26,7 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+
+wealth:
+  market-price:
+    max-age: ${WEALTH_MARKET_PRICE_MAX_AGE:30s}

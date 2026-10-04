@@ -2,6 +2,7 @@ package org.fincore.wealth.position.infrastructure.persistence;
 
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.domain.Position;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
@@ -53,7 +54,7 @@ public class PositionRepositoryAdapter implements PositionRepository {
     }
 
     @Override
-    public List<Position> findAllByPortfolioId(
+    public Page<Position> findAllByPortfolioId(
             UUID portfolioId,
             Pageable pageable
     ) {
@@ -62,8 +63,7 @@ public class PositionRepositoryAdapter implements PositionRepository {
                         portfolioId,
                         pageable
                 )
-                .map(mapper::toDomain)
-                .getContent();
+                .map(mapper::toDomain);
     }
 
     @Override

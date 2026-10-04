@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,15 +25,18 @@ public class ListPortfolioPositions {
     private final PortfolioRepository portfolios;
     private final PositionRepository positions;
     private final MarketPriceProvider prices;
+    private final MarketPricePolicy pricePolicy;
 
     public ListPortfolioPositions(
             PortfolioRepository portfolios,
             PositionRepository positions,
-            MarketPriceProvider prices
+            MarketPriceProvider prices,
+            MarketPricePolicy pricePolicy
     ) {
         this.portfolios = portfolios;
         this.positions = positions;
         this.prices = prices;
+        this.pricePolicy = pricePolicy;
     }
 
     @Transactional(readOnly = true)
@@ -46,7 +48,10 @@ public class ListPortfolioPositions {
     ) {
         validatePagination(page, size);
 
-        portfolios.findOwnedById(portfolioId, userId)
+        portfolios.findOwnedById(
+                        portfolioId,
+                        userId
+                )
                 .orElseThrow(() ->
                         new PortfolioNotFoundException("not found")
                 );
@@ -55,21 +60,20 @@ public class ListPortfolioPositions {
                 page,
                 size,
                 Sort.by(
-                        Sort.Direction.ASC,
-                        "assetId"
+                        Sort.Order.asc("assetId")
                 )
         );
 
-        var results =
-                positions.findAllByPortfolioId(
-                        portfolioId,
-                        pageable
-                );
+        var result = positions.findAllByPortfolioId(
+                portfolioId,
+                pageable
+        );
 
         Map<UUID, MarketPrice> marketPrices =
-                loadMarketPrices(results);
+                loadMarketPrices(result.getContent());
 
-        var responses = results.stream()
+        var responses = result.getContent()
+                .stream()
                 .map(position ->
                         toResponse(
                                 position,
@@ -80,9 +84,9 @@ public class ListPortfolioPositions {
 
         return new PositionPageResponse(
                 responses,
-                page,
-                size,
-                results.size() == size
+                result.getNumber(),
+                result.getSize(),
+                result.hasNext()
         );
     }
 
@@ -108,11 +112,23 @@ public class ListPortfolioPositions {
                 marketPrices.get(position.assetId());
 
         if (marketPrice == null) {
-            return unavailableResponse(position, null);
+            return unavailableResponse(
+                    position,
+                    null
+            );
+        }
+
+        if (!pricePolicy.isUsable(marketPrice)) {
+            return unavailableResponse(
+                    position,
+                    marketPrice
+            );
         }
 
         if (!position.currency()
-                .equalsIgnoreCase(marketPrice.currency())) {
+                .equalsIgnoreCase(
+                        marketPrice.currency()
+                )) {
 
             return unavailableResponse(
                     position,
@@ -120,10 +136,11 @@ public class ListPortfolioPositions {
             );
         }
 
-        var valuation = PositionValuation.calculate(
-                position,
-                marketPrice.price()
-        );
+        var valuation =
+                PositionValuation.calculate(
+                        position,
+                        marketPrice.price()
+                );
 
         return new PositionResponse(
                 position.assetId(),
