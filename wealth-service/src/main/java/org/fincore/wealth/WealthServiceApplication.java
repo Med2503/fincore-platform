@@ -1,12 +1,13 @@
 package org.fincore.wealth;
 
+import org.fincore.wealth.position.outbox.infrastructure.config.OutboxPublisherProperties;
 import org.fincore.wealth.position.service.MarketPriceProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties(MarketPriceProperties.class)
+@EnableConfigurationProperties({MarketPriceProperties.class, OutboxPublisherProperties.class})
 public class WealthServiceApplication {
 
     public static void main(String[] args) {

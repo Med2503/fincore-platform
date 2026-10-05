@@ -7,9 +7,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class OutboxEventPersistenceMapper {
 
-    public OutboxEvent toDomain(
-            OutboxEventJpaEntity entity
-    ) {
+    public OutboxEvent toDomain(OutboxEventJpaEntity entity) {
         return new OutboxEvent(
                 entity.getId(),
                 entity.getAggregateId(),
@@ -18,39 +16,35 @@ public class OutboxEventPersistenceMapper {
                 entity.getOccurredAt(),
                 entity.getPublishedAt(),
                 entity.getStatus(),
-                entity.getRetryCount()
+                entity.getRetryCount(),
+                entity.getNextAttemptAt()
         );
     }
 
-    public OutboxEventJpaEntity toEntity(
-            OutboxEvent event
-    ) {
+    public OutboxEventJpaEntity toEntity(OutboxEvent domain) {
         OutboxEventJpaEntity entity =
                 new OutboxEventJpaEntity();
 
-        entity.setId(event.id());
-        entity.setAggregateId(
-                event.aggregateId()
-        );
-        entity.setEventType(
-                event.eventType()
-        );
-        entity.setPayload(
-                event.payload()
-        );
-        entity.setOccurredAt(
-                event.occurredAt()
-        );
-        entity.setPublishedAt(
-                event.publishedAt()
-        );
-        entity.setStatus(
-                event.status()
-        );
-        entity.setRetryCount(
-                event.retryCount()
-        );
+        entity.setId(domain.id());
+        entity.setAggregateId(domain.aggregateId());
+        entity.setEventType(domain.eventType());
+        entity.setPayload(domain.payload());
+        entity.setOccurredAt(domain.occurredAt());
+        entity.setPublishedAt(domain.publishedAt());
+        entity.setStatus(domain.status());
+        entity.setRetryCount(domain.retryCount());
+        entity.setNextAttemptAt(domain.nextAttemptAt());
 
         return entity;
+    }
+
+    public void updateEntity(
+            OutboxEventJpaEntity entity,
+            OutboxEvent domain
+    ) {
+        entity.setPublishedAt(domain.publishedAt());
+        entity.setStatus(domain.status());
+        entity.setRetryCount(domain.retryCount());
+        entity.setNextAttemptAt(domain.nextAttemptAt());
     }
 }

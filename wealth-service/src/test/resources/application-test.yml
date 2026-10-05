@@ -13,3 +13,23 @@ spring:
   test:
     database:
       replace: none
+
+
+
+  cloud:
+    stream:
+      bindings:
+        positionChanged-out-0:
+          destination: wealth.position.changed
+          content-type: application/json
+
+      kafka:
+        binder:
+          brokers: ${KAFKA_BROKERS:localhost:9092}
+
+wealth:
+  outbox:
+    publisher:
+      fixed-delay: ${WEALTH_OUTBOX_FIXED_DELAY:2000}
+      batch-size: ${WEALTH_OUTBOX_BATCH_SIZE:50}
+      max-retries: ${WEALTH_OUTBOX_MAX_RETRIES:10}

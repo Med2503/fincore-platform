@@ -1,9 +1,17 @@
 package org.fincore.wealth.position.outbox.infrastructure.persistence;
 
-
 import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
+import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
+import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventJpaEntity;
+import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventPersistenceMapper;
+import org.fincore.wealth.position.outbox.infrastructure.persistence.SpringDataOutboxEventRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.List;
 
 @Repository
 public class OutboxEventRepositoryAdapter
@@ -31,5 +39,40 @@ public class OutboxEventRepositoryAdapter
                 repository.save(entity);
 
         return mapper.toDomain(saved);
+    }
+
+    @Override
+    @Transactional
+    public void update(
+            OutboxEvent event
+    ) {
+        OutboxEventJpaEntity entity =
+                repository.findById(event.id())
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Outbox event not found: "
+                                                + event.id()
+                                )
+                        );
+
+        mapper.updateEntity(entity, event);
+
+        repository.save(entity);
+    }
+
+    @Override
+    @Transactional
+    public List<OutboxEvent> findPending(
+            Instant now,
+            int batchSize
+    ) {
+        return repository.findPendingForUpdate(
+                        OutboxEventStatus.PENDING.name(),
+                        now,
+                        batchSize
+                )
+                .stream()
+                .map(mapper::toDomain)
+                .toList();
     }
 }

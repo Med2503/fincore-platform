@@ -1,6 +1,9 @@
 package org.fincore.wealth.position.outbox.domain;
 
+import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
+
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 public record OutboxEvent(
@@ -11,39 +14,17 @@ public record OutboxEvent(
         Instant occurredAt,
         Instant publishedAt,
         OutboxEventStatus status,
-        int retryCount
+        int retryCount,
+        Instant nextAttemptAt
 ) {
 
     public OutboxEvent {
-        if (id == null) {
-            throw new IllegalArgumentException(
-                    "Outbox event ID is required"
-            );
-        }
-
-        if (aggregateId == null) {
-            throw new IllegalArgumentException(
-                    "Aggregate ID is required"
-            );
-        }
-
-        if (eventType == null || eventType.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Event type is required"
-            );
-        }
-
-        if (payload == null || payload.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Payload is required"
-            );
-        }
-
-        if (occurredAt == null) {
-            throw new IllegalArgumentException(
-                    "Occurred at is required"
-            );
-        }
+        Objects.requireNonNull(id, "ID is required");
+        Objects.requireNonNull(aggregateId, "Aggregate ID is required");
+        Objects.requireNonNull(eventType, "Event type is required");
+        Objects.requireNonNull(payload, "Payload is required");
+        Objects.requireNonNull(occurredAt, "Occurred at is required");
+        Objects.requireNonNull(status, "Status is required");
 
         if (retryCount < 0) {
             throw new IllegalArgumentException(
@@ -66,13 +47,12 @@ public record OutboxEvent(
                 occurredAt,
                 null,
                 OutboxEventStatus.PENDING,
-                0
+                0,
+                occurredAt
         );
     }
 
-    public OutboxEvent markPublished(
-            Instant publishedAt
-    ) {
+    public OutboxEvent markPublished(Instant publishedAt) {
         return new OutboxEvent(
                 id,
                 aggregateId,
@@ -81,20 +61,27 @@ public record OutboxEvent(
                 occurredAt,
                 publishedAt,
                 OutboxEventStatus.PUBLISHED,
-                retryCount
+                retryCount,
+                null
         );
     }
 
-    public OutboxEvent markFailed() {
+    public OutboxEvent markFailed(
+            Instant nextAttemptAt,
+            boolean permanentlyFailed
+    ) {
         return new OutboxEvent(
                 id,
                 aggregateId,
                 eventType,
                 payload,
                 occurredAt,
-                publishedAt,
-                OutboxEventStatus.FAILED,
-                retryCount + 1
+                null,
+                permanentlyFailed
+                        ? OutboxEventStatus.FAILED
+                        : OutboxEventStatus.PENDING,
+                retryCount + 1,
+                nextAttemptAt
         );
     }
 }

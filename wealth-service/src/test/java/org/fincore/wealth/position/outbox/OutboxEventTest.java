@@ -12,65 +12,65 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OutboxEventTest {
 
+    private static final UUID AGGREGATE_ID =
+            UUID.randomUUID();
+
+    private static final Instant OCCURRED_AT =
+            Instant.parse("2026-10-05T10:00:00Z");
+
     @Test
     void shouldCreatePendingEvent() {
-        UUID aggregateId = UUID.randomUUID();
-        Instant occurredAt = Instant.parse(
-                "2026-10-02T10:00:00Z"
-        );
-
         OutboxEvent event = OutboxEvent.pending(
-                aggregateId,
-                "PositionUpdated",
+                AGGREGATE_ID,
+                "PositionChanged",
                 "{\"quantity\":10}",
-                occurredAt
+                OCCURRED_AT
         );
 
-        assertThat(event.id())
-                .isNotNull();
-
+        assertThat(event.id()).isNotNull();
         assertThat(event.aggregateId())
-                .isEqualTo(aggregateId);
-
+                .isEqualTo(AGGREGATE_ID);
         assertThat(event.eventType())
-                .isEqualTo("PositionUpdated");
-
+                .isEqualTo("PositionChanged");
         assertThat(event.payload())
                 .isEqualTo("{\"quantity\":10}");
-
         assertThat(event.occurredAt())
-                .isEqualTo(occurredAt);
-
+                .isEqualTo(OCCURRED_AT);
         assertThat(event.publishedAt())
                 .isNull();
-
         assertThat(event.status())
                 .isEqualTo(OutboxEventStatus.PENDING);
-
         assertThat(event.retryCount())
                 .isZero();
+        assertThat(event.nextAttemptAt())
+                .isEqualTo(OCCURRED_AT);
     }
 
     @Test
-    void shouldMarkPendingEventAsPublished() {
-        Instant occurredAt = Instant.parse(
-                "2026-10-02T10:00:00Z"
-        );
-
-        Instant publishedAt = Instant.parse(
-                "2026-10-02T10:01:00Z"
-        );
-
+    void shouldMarkEventAsPublished() {
         OutboxEvent event = OutboxEvent.pending(
-                UUID.randomUUID(),
-                "PositionUpdated",
+                AGGREGATE_ID,
+                "PositionChanged",
                 "{}",
-                occurredAt
+                OCCURRED_AT
         );
 
-        OutboxEvent published = event.markPublished(
-                publishedAt
-        );
+        Instant publishedAt =
+                Instant.parse("2026-10-05T10:00:05Z");
+
+        OutboxEvent published =
+                event.markPublished(publishedAt);
+
+        assertThat(published.id())
+                .isEqualTo(event.id());
+        assertThat(published.aggregateId())
+                .isEqualTo(event.aggregateId());
+        assertThat(published.eventType())
+                .isEqualTo(event.eventType());
+        assertThat(published.payload())
+                .isEqualTo(event.payload());
+        assertThat(published.occurredAt())
+                .isEqualTo(event.occurredAt());
 
         assertThat(published.status())
                 .isEqualTo(OutboxEventStatus.PUBLISHED);
@@ -80,44 +80,98 @@ class OutboxEventTest {
 
         assertThat(published.retryCount())
                 .isZero();
+
+        assertThat(published.nextAttemptAt())
+                .isNull();
     }
 
     @Test
-    void shouldIncrementRetryCountWhenMarkedFailed() {
+    void shouldScheduleRetryWhenEventFails() {
         OutboxEvent event = OutboxEvent.pending(
-                UUID.randomUUID(),
-                "PositionUpdated",
+                AGGREGATE_ID,
+                "PositionChanged",
                 "{}",
-                Instant.parse(
-                        "2026-10-02T10:00:00Z"
-                )
+                OCCURRED_AT
         );
 
-        OutboxEvent failed = event.markFailed();
+        Instant nextAttempt =
+                Instant.parse("2026-10-05T10:00:10Z");
+
+        OutboxEvent failed =
+                event.markFailed(
+                        nextAttempt,
+                        false
+                );
+
+        assertThat(failed.id())
+                .isEqualTo(event.id());
+
+        assertThat(failed.status())
+                .isEqualTo(OutboxEventStatus.PENDING);
+
+        assertThat(failed.retryCount())
+                .isEqualTo(1);
+
+        assertThat(failed.nextAttemptAt())
+                .isEqualTo(nextAttempt);
+
+        assertThat(failed.publishedAt())
+                .isNull();
+    }
+
+    @Test
+    void shouldMarkEventAsPermanentlyFailed() {
+        OutboxEvent event = OutboxEvent.pending(
+                AGGREGATE_ID,
+                "PositionChanged",
+                "{}",
+                OCCURRED_AT
+        );
+
+        OutboxEvent failed =
+                event.markFailed(
+                        null,
+                        true
+                );
 
         assertThat(failed.status())
                 .isEqualTo(OutboxEventStatus.FAILED);
 
         assertThat(failed.retryCount())
                 .isEqualTo(1);
+
+        assertThat(failed.nextAttemptAt())
+                .isNull();
+
+        assertThat(failed.publishedAt())
+                .isNull();
     }
 
     @Test
-    void shouldRejectNegativeRetryCount() {
-        assertThatThrownBy(() ->
-                new OutboxEvent(
-                        UUID.randomUUID(),
-                        UUID.randomUUID(),
-                        "PositionUpdated",
-                        "{}",
-                        Instant.now(),
-                        null,
-                        OutboxEventStatus.PENDING,
-                        -1
-                )
-        )
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Retry count cannot be negative");
+    void shouldIncrementRetryCountOnEveryFailure() {
+        OutboxEvent event = new OutboxEvent(
+                UUID.randomUUID(),
+                AGGREGATE_ID,
+                "PositionChanged",
+                "{}",
+                OCCURRED_AT,
+                null,
+                OutboxEventStatus.PENDING,
+                3,
+                OCCURRED_AT
+        );
+
+        OutboxEvent failed =
+                event.markFailed(
+                        OCCURRED_AT.plusSeconds(10),
+                        false
+                );
+
+        assertThat(failed.retryCount())
+                .isEqualTo(4);
+
+        assertThat(failed.status())
+                .isEqualTo(OutboxEventStatus.PENDING);
     }
 
     @Test
@@ -125,13 +179,14 @@ class OutboxEventTest {
         assertThatThrownBy(() ->
                 new OutboxEvent(
                         null,
-                        UUID.randomUUID(),
-                        "PositionUpdated",
+                        AGGREGATE_ID,
+                        "PositionChanged",
                         "{}",
-                        Instant.now(),
+                        OCCURRED_AT,
                         null,
                         OutboxEventStatus.PENDING,
-                        0
+                        0,
+                        OCCURRED_AT
                 )
         )
                 .isInstanceOf(NullPointerException.class)
@@ -139,20 +194,78 @@ class OutboxEventTest {
     }
 
     @Test
-    void shouldRejectBlankEventType() {
+    void shouldRejectNullAggregateId() {
         assertThatThrownBy(() ->
                 new OutboxEvent(
                         UUID.randomUUID(),
-                        UUID.randomUUID(),
-                        " ",
+                        null,
+                        "PositionChanged",
                         "{}",
-                        Instant.now(),
+                        OCCURRED_AT,
                         null,
                         OutboxEventStatus.PENDING,
-                        0
+                        0,
+                        OCCURRED_AT
+                )
+        )
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("Aggregate ID is required");
+    }
+
+    @Test
+    void shouldRejectNullEventType() {
+        assertThatThrownBy(() ->
+                new OutboxEvent(
+                        UUID.randomUUID(),
+                        AGGREGATE_ID,
+                        null,
+                        "{}",
+                        OCCURRED_AT,
+                        null,
+                        OutboxEventStatus.PENDING,
+                        0,
+                        OCCURRED_AT
+                )
+        )
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("Event type is required");
+    }
+
+    @Test
+    void shouldRejectNullPayload() {
+        assertThatThrownBy(() ->
+                new OutboxEvent(
+                        UUID.randomUUID(),
+                        AGGREGATE_ID,
+                        "PositionChanged",
+                        null,
+                        OCCURRED_AT,
+                        null,
+                        OutboxEventStatus.PENDING,
+                        0,
+                        OCCURRED_AT
+                )
+        )
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("Payload is required");
+    }
+
+    @Test
+    void shouldRejectNegativeRetryCount() {
+        assertThatThrownBy(() ->
+                new OutboxEvent(
+                        UUID.randomUUID(),
+                        AGGREGATE_ID,
+                        "PositionChanged",
+                        "{}",
+                        OCCURRED_AT,
+                        null,
+                        OutboxEventStatus.PENDING,
+                        -1,
+                        OCCURRED_AT
                 )
         )
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Event type cannot be blank");
+                .hasMessage("Retry count cannot be negative");
     }
 }
