@@ -2,10 +2,6 @@ package org.fincore.wealth.position.outbox.infrastructure.persistence;
 
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
 import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventJpaEntity;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventPersistenceMapper;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventRepositoryAdapter;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.SpringDataOutboxEventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

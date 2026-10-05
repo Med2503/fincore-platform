@@ -3,10 +3,6 @@ package org.fincore.wealth.position.outbox.infrastructure.persistence;
 import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
 import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventJpaEntity;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventPersistenceMapper;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.SpringDataOutboxEventRepository;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
