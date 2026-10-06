@@ -19,31 +19,23 @@ public record OutboxEvent(
 ) {
 
     public OutboxEvent {
-        Objects.requireNonNull(
-                id,
-                "ID is required"
-        );
-
+        Objects.requireNonNull(id, "ID is required");
         Objects.requireNonNull(
                 aggregateId,
                 "Aggregate ID is required"
         );
-
         Objects.requireNonNull(
                 eventType,
                 "Event type is required"
         );
-
         Objects.requireNonNull(
                 payload,
                 "Payload is required"
         );
-
         Objects.requireNonNull(
                 occurredAt,
                 "Occurred at is required"
         );
-
         Objects.requireNonNull(
                 status,
                 "Status is required"

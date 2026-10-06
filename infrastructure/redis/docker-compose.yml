@@ -1,0 +1,12 @@
+services:
+  fincore-redis:
+    image: redis:7-alpine
+    container_name: fincore-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - fincore_redis_data:/data
+
+volumes:
+  fincore_redis_data:
