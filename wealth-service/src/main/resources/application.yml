@@ -39,20 +39,38 @@ wealth:
 
 
 
-  cloud:
-    stream:
-      bindings:
-        positionChangedInput-in-0:
-          destination: wealth.position.changed
-          group: wealth-position-consumer
-          content-type: application/json
+  spring:
+    application:
+      name: wealth-service
 
-      kafka:
+    cloud:
+      function:
+        definition: positionChangedInput
+
+      stream:
         bindings:
+
           positionChangedInput-in-0:
+            destination: wealth.position.changed
+            group: wealth-position-consumer
+            content-type: application/json
             consumer:
-              enableDlq: true
-              dlqName: wealth.position.changed.dlq
-              autoCommitOffset: false
+              maxAttempts: 3
+              backOffInitialInterval: 1000
+              backOffMultiplier: 2.0
+              backOffMaxInterval: 10000
 
+          positionChanged-out-0:
+            destination: wealth.position.changed
+            content-type: application/json
 
+        kafka:
+          binder:
+            brokers: ${KAFKA_BROKERS:localhost:9092}
+
+          bindings:
+
+            positionChangedInput-in-0:
+              consumer:
+                enableDlq: true
+                dlqName: wealth.position.changed.dlq
