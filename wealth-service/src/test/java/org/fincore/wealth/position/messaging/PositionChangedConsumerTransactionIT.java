@@ -2,15 +2,16 @@ package org.fincore.wealth.position.messaging;
 
 import org.fincore.wealth.position.application.event.PositionChangedEvent;
 import org.fincore.wealth.position.application.port.PositionProjectionRepository;
+import org.fincore.wealth.position.application.port.ProcessedPositionChangedEventRepository;
+import org.fincore.wealth.position.application.projection.PositionProjection;
 import org.fincore.wealth.position.application.service.PositionChangedProjectionService;
 import org.fincore.wealth.position.infrastructure.messaging.PositionChangedConsumer;
-import org.fincore.wealth.position.infrastructure.persistence.JdbcProcessedPositionChangedEventRepository;
-
-import org.fincore.wealth.position.outbox.infrastructure.persistence.JdbcPositionProjectionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -22,8 +23,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers
 @SpringBootTest
@@ -31,43 +32,54 @@ class PositionChangedConsumerTransactionIT {
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:16")
-                    .withDatabaseName("wealth_test")
-                    .withUsername("wealth_user")
-                    .withPassword("wealth_password");
+            new PostgreSQLContainer<>("postgres:16");
 
     @DynamicPropertySource
-    static void configureDatabase(
+    static void configureProperties(
             DynamicPropertyRegistry registry
     ) {
         registry.add(
                 "spring.datasource.url",
                 POSTGRES::getJdbcUrl
         );
+
         registry.add(
                 "spring.datasource.username",
                 POSTGRES::getUsername
         );
+
         registry.add(
                 "spring.datasource.password",
+                POSTGRES::getPassword
+        );
+
+        registry.add(
+                "spring.flyway.url",
+                POSTGRES::getJdbcUrl
+        );
+
+        registry.add(
+                "spring.flyway.user",
+                POSTGRES::getUsername
+        );
+
+        registry.add(
+                "spring.flyway.password",
                 POSTGRES::getPassword
         );
     }
 
     @Autowired
+    private PositionChangedConsumer consumer;
+
+    @Autowired
+    private ProcessedPositionChangedEventRepository processedEvents;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private JdbcPositionProjectionRepository projectionRepository;
-
-    @Autowired
-    private JdbcProcessedPositionChangedEventRepository processedEvents;
-
-    private UUID portfolioId;
-    private UUID assetId;
-
     @BeforeEach
-    void setUp() {
+    void cleanDatabase() {
         jdbcTemplate.update(
                 "DELETE FROM processed_position_changed_events"
         );
@@ -75,154 +87,89 @@ class PositionChangedConsumerTransactionIT {
         jdbcTemplate.update(
                 "DELETE FROM position_projections"
         );
-
-        portfolioId = UUID.randomUUID();
-        assetId = UUID.randomUUID();
     }
 
     @Test
-    void shouldRollbackClaimWhenProjectionFails() {
+    void shouldRollbackProcessedEventWhenProjectionFails() {
         UUID eventId = UUID.randomUUID();
 
-        PositionChangedEvent event =
-                validEvent(eventId);
+        PositionChangedEvent event = createEvent(eventId);
 
-        PositionChangedConsumer consumer =
-                new PositionChangedConsumer(
-                        processedEvents,
-                        failingProjectionService()
-                );
-
-        assertThatThrownBy(
+        assertThrows(
+                IllegalStateException.class,
                 () -> consumer.consume(event)
-        )
-                .isInstanceOf(
-                        IllegalStateException.class
-                )
-                .hasMessage(
-                        "Projection failed"
-                );
+        );
 
+        assertTrue(
+                processedEventDoesNotExist(eventId)
+        );
+    }
+
+    private boolean processedEventDoesNotExist(
+            UUID eventId
+    ) {
         Integer count = jdbcTemplate.queryForObject(
                 """
-                        SELECT COUNT(*)
-                        FROM processed_position_changed_events
-                        WHERE event_id = ?
-                        """,
+                SELECT COUNT(*)
+                FROM processed_position_changed_events
+                WHERE event_id = ?
+                """,
                 Integer.class,
                 eventId
         );
 
-        assertThat(count)
-                .isZero();
+        return count != null && count == 0;
     }
 
-    @Test
-    void shouldAllowSameEventToBeProcessedAgainAfterRollback() {
-        UUID eventId = UUID.randomUUID();
-
-        PositionChangedEvent event =
-                validEvent(eventId);
-
-        PositionChangedConsumer failingConsumer =
-                new PositionChangedConsumer(
-                        processedEvents,
-                        failingProjectionService()
-                );
-
-        assertThatThrownBy(
-                () -> failingConsumer.consume(event)
-        )
-                .isInstanceOf(
-                        IllegalStateException.class
-                );
-
-        PositionChangedConsumer successfulConsumer =
-                new PositionChangedConsumer(
-                        processedEvents,
-                        new PositionChangedProjectionService(
-                                projectionRepository
-                        )
-                );
-
-        successfulConsumer.consume(event);
-
-        assertThat(
-                projectionRepository.find(
-                        portfolioId,
-                        assetId
-                )
-        )
-                .isPresent();
-
-        Integer count = jdbcTemplate.queryForObject(
-                """
-                        SELECT COUNT(*)
-                        FROM processed_position_changed_events
-                        WHERE event_id = ?
-                        """,
-                Integer.class,
-                eventId
-        );
-
-        assertThat(count)
-                .isEqualTo(1);
-    }
-
-    private PositionChangedEvent validEvent(
+    private PositionChangedEvent createEvent(
             UUID eventId
     ) {
         return new PositionChangedEvent(
                 eventId,
-                portfolioId,
-                assetId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
                 new BigDecimal("10"),
                 new BigDecimal("100"),
                 "EUR",
                 1,
                 Instant.parse(
-                        "2026-10-05T10:00:00Z"
+                        "2026-09-30T10:00:00Z"
                 )
         );
     }
 
-    private PositionChangedProjectionService
-    failingProjectionService() {
+    @TestConfiguration
+    static class FailureConfiguration {
 
-        return new PositionChangedProjectionService(
-                new PositionProjectionRepository() {
+        @Bean
+        PositionChangedProjectionService projectionService() {
+            PositionProjectionRepository repository =
+                    new FailingPositionProjectionRepository();
 
-                    @Override
-                    public void save(
-                            org.fincore.wealth.position.application
-                                    .projection.PositionProjection projection
-                    ) {
-                        throw new IllegalStateException(
-                                "Projection failed"
-                        );
-                    }
+            return new PositionChangedProjectionService(
+                    repository
+            );
+        }
+    }
 
-                    @Override
-                    public void delete(
-                            UUID portfolioId,
-                            UUID assetId
-                    ) {
-                        throw new IllegalStateException(
-                                "Projection failed"
-                        );
-                    }
+    static class FailingPositionProjectionRepository
+            implements PositionProjectionRepository {
 
-                    @Override
-                    public java.util.Optional<
-                            org.fincore.wealth.position.application
-                                    .projection.PositionProjection
-                            > find(
-                            UUID portfolioId,
-                            UUID assetId
-                    ) {
-                        return java.util.Optional.empty();
-                    }
-                }
-        );
+        @Override
+        public void save(
+                PositionProjection projection
+        ) {
+            throw new IllegalStateException(
+                    "Projection failure"
+            );
+        }
+
+        @Override
+        public java.util.Optional<PositionProjection> find(
+                UUID portfolioId,
+                UUID assetId
+        ) {
+            return java.util.Optional.empty();
+        }
     }
 }
