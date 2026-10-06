@@ -1,8 +1,10 @@
 package org.fincore.wealth.position.messaging;
 
 
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.fincore.wealth.position.application.event.PositionChangedEvent;
 import org.fincore.wealth.position.application.service.PositionChangedProjectionService;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
+import org.springframework.boot.test.context.TestConfiguration;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -247,7 +250,7 @@ class PositionChangedConsumerKafkaIT {
                 eventId,
                 UUID.randomUUID(),
                 UUID.randomUUID(),
-                UUID.randomUUID(),
+
                 new BigDecimal("10"),
                 new BigDecimal("100"),
                 "EUR",

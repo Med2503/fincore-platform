@@ -37,6 +37,9 @@ wealth:
       batch-size: ${WEALTH_OUTBOX_BATCH_SIZE:50}
       max-retries: ${WEALTH_OUTBOX_MAX_RETRIES:10}
 
+  dlq:
+    replay:
+      max-replays: ${WEALTH_DLQ_MAX_REPLAYS:3}
 
 
   spring:
@@ -45,28 +48,61 @@ wealth:
 
     cloud:
       function:
-        definition: positionChangedInput
+        definition: positionChangedInput,positionChangedDlqInput
 
       stream:
         bindings:
+
+
+          # PositionChanged - Consumer principal
+
 
           positionChangedInput-in-0:
             destination: wealth.position.changed
             group: wealth-position-consumer
             content-type: application/json
+
             consumer:
               maxAttempts: 3
               backOffInitialInterval: 1000
               backOffMultiplier: 2.0
               backOffMaxInterval: 10000
 
+          # PositionChanged - Producer / Outbox
+
+
           positionChanged-out-0:
             destination: wealth.position.changed
             content-type: application/json
 
+
+          # PositionChanged - Replay depuis DLQ
+
+
+          positionChangedReplay-out-0:
+            destination: wealth.position.changed
+            content-type: application/json
+
+
+          # DLQ Consumer
+
+
+          positionChangedDlqInput-in-0:
+            destination: wealth.position.changed.dlq
+            group: wealth-position-dlq-reprocessor
+            content-type: application/json
+
+
+        # Kafka Binder
+
+
         kafka:
           binder:
             brokers: ${KAFKA_BROKERS:localhost:9092}
+
+
+          # Kafka configuration for the main consumer
+
 
           bindings:
 
