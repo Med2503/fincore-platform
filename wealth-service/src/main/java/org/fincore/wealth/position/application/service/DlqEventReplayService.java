@@ -1,8 +1,9 @@
 package org.fincore.wealth.position.application.service;
 
-import org.fincore.wealth.position.application.port.DlqReplayAuditRepository;
+import org.fincore.wealth.position.application.port.DlqReplayAttemptRepository;
 import org.fincore.wealth.position.application.port.PositionChangedEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -13,23 +14,59 @@ import java.util.UUID;
 public class DlqEventReplayService {
 
     private final PositionChangedEventPublisher publisher;
-    private final DlqReplayAuditRepository auditRepository;
+    private final DlqReplayAttemptRepository attempts;
     private final Clock clock;
 
     public DlqEventReplayService(
             PositionChangedEventPublisher publisher,
-            DlqReplayAuditRepository auditRepository,
+            DlqReplayAttemptRepository attempts,
             Clock clock
     ) {
         this.publisher = publisher;
-        this.auditRepository = auditRepository;
+        this.attempts = attempts;
         this.clock = clock;
     }
 
+    @Transactional
     public DlqReplayResult replay(
             UUID eventId,
             String payload,
-            int replayCount,
+            int maxReplays
+    ) {
+        validate(
+                eventId,
+                payload,
+                maxReplays
+        );
+
+        Instant now = clock.instant();
+
+        int claimed =
+                attempts.claimNextReplay(
+                        eventId,
+                        now,
+                        maxReplays
+                );
+
+        if (claimed == 0) {
+            return DlqReplayResult.REJECTED;
+        }
+
+        boolean published =
+                publisher.publish(payload);
+
+        if (!published) {
+            throw new IllegalStateException(
+                    "Unable to publish DLQ event"
+            );
+        }
+
+        return DlqReplayResult.REPLAYED;
+    }
+
+    private void validate(
+            UUID eventId,
+            String payload,
             int maxReplays
     ) {
         Objects.requireNonNull(
@@ -48,37 +85,10 @@ public class DlqEventReplayService {
             );
         }
 
-        if (replayCount < 0) {
-            throw new IllegalArgumentException(
-                    "Replay count cannot be negative"
-            );
-        }
-
         if (maxReplays <= 0) {
             throw new IllegalArgumentException(
                     "Maximum replays must be positive"
             );
         }
-
-        if (replayCount >= maxReplays) {
-            return DlqReplayResult.REJECTED;
-        }
-
-        boolean published =
-                publisher.publish(payload);
-
-        if (!published) {
-            throw new IllegalStateException(
-                    "Unable to publish DLQ event"
-            );
-        }
-
-        auditRepository.record(
-                eventId,
-                replayCount + 1,
-                Instant.now(clock)
-        );
-
-        return DlqReplayResult.REPLAYED;
     }
 }

@@ -10,9 +10,6 @@ import java.util.UUID;
 @Component
 public class PositionChangedDlqConsumer {
 
-    private static final String REPLAY_COUNT_HEADER =
-            "x-dlq-replay-count";
-
     private final DlqEventReplayService replayService;
     private final DlqReplayProperties properties;
     private final PositionChangedEventIdExtractor eventIdExtractor;
@@ -34,14 +31,10 @@ public class PositionChangedDlqConsumer {
         UUID eventId =
                 eventIdExtractor.extract(payload);
 
-        int replayCount =
-                extractReplayCount(message);
-
         DlqReplayResult result =
                 replayService.replay(
                         eventId,
                         payload,
-                        replayCount,
                         properties.maxReplays()
                 );
 
@@ -51,25 +44,5 @@ public class PositionChangedDlqConsumer {
                             + eventId
             );
         }
-    }
-
-    private int extractReplayCount(
-            Message<String> message
-    ) {
-        Object value =
-                message.getHeaders()
-                        .get(REPLAY_COUNT_HEADER);
-
-        if (value == null) {
-            return 0;
-        }
-
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-
-        return Integer.parseInt(
-                value.toString()
-        );
     }
 }
