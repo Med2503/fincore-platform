@@ -1,7 +1,7 @@
 package org.fincore.wealth.position.application.service;
 
 import org.fincore.wealth.position.application.port.DlqReplayAttemptRepository;
-import org.fincore.wealth.position.application.port.PositionChangedEventPublisher;
+import org.fincore.wealth.position.application.port.DlqReplayOutboxRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,15 +12,22 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class DlqEventReplayServiceTest {
 
     private DlqReplayAttemptRepository attempts;
 
-    private PositionChangedEventPublisher publisher;
+    private DlqReplayOutboxRepository outbox;
 
     private DlqEventReplayService service;
+
+    private Clock clock;
 
     @BeforeEach
     void setUp() {
@@ -28,41 +35,36 @@ class DlqEventReplayServiceTest {
                 DlqReplayAttemptRepository.class
         );
 
-        publisher = mock(
-                PositionChangedEventPublisher.class
+        outbox = mock(
+                DlqReplayOutboxRepository.class
         );
 
-        Clock clock =
-                Clock.fixed(
-                        Instant.parse(
-                                "2026-09-30T10:00:00Z"
-                        ),
-                        ZoneOffset.UTC
-                );
+        clock = Clock.fixed(
+                Instant.parse(
+                        "2026-09-30T10:00:00Z"
+                ),
+                ZoneOffset.UTC
+        );
 
         service = new DlqEventReplayService(
-                publisher,
                 attempts,
+                outbox,
                 clock
         );
     }
 
     @Test
-    void shouldReplayWhenAttemptIsClaimed() {
+    void shouldCreateReplayOutboxWhenAttemptIsClaimed() {
 
         UUID eventId = UUID.randomUUID();
 
         when(
                 attempts.claimNextReplay(
                         eq(eventId),
-                        any(),
+                        any(Instant.class),
                         eq(3)
                 )
         ).thenReturn(1);
-
-        when(
-                publisher.publish("payload")
-        ).thenReturn(true);
 
         DlqReplayResult result =
                 service.replay(
@@ -77,8 +79,24 @@ class DlqEventReplayServiceTest {
         );
 
         verify(
-                publisher
-        ).publish("payload");
+                attempts
+        ).claimNextReplay(
+                eq(eventId),
+                eq(Instant.parse(
+                        "2026-09-30T10:00:00Z"
+                )),
+                eq(3)
+        );
+
+        verify(
+                outbox
+        ).save(
+                eq(eventId),
+                eq("payload"),
+                eq(Instant.parse(
+                        "2026-09-30T10:00:00Z"
+                ))
+        );
     }
 
     @Test
@@ -89,7 +107,7 @@ class DlqEventReplayServiceTest {
         when(
                 attempts.claimNextReplay(
                         eq(eventId),
-                        any(),
+                        any(Instant.class),
                         eq(3)
                 )
         ).thenReturn(0);
@@ -106,25 +124,39 @@ class DlqEventReplayServiceTest {
                 result
         );
 
-        verifyNoInteractions(publisher);
+        verify(
+                attempts
+        ).claimNextReplay(
+                eq(eventId),
+                any(Instant.class),
+                eq(3)
+        );
+
+        verifyNoInteractions(outbox);
     }
 
     @Test
-    void shouldRollbackWhenPublicationFails() {
+    void shouldPropagateOutboxFailure() {
 
         UUID eventId = UUID.randomUUID();
 
         when(
                 attempts.claimNextReplay(
                         eq(eventId),
-                        any(),
+                        any(Instant.class),
                         eq(3)
                 )
         ).thenReturn(1);
 
-        when(
-                publisher.publish("payload")
-        ).thenReturn(false);
+        org.mockito.Mockito.doThrow(
+                new IllegalStateException(
+                        "Outbox persistence failure"
+                )
+        ).when(outbox).save(
+                eq(eventId),
+                eq("payload"),
+                any(Instant.class)
+        );
 
         assertThrows(
                 IllegalStateException.class,
@@ -136,23 +168,87 @@ class DlqEventReplayServiceTest {
         );
 
         verify(
-                publisher
-        ).publish("payload");
+                attempts
+        ).claimNextReplay(
+                eq(eventId),
+                any(Instant.class),
+                eq(3)
+        );
+
+        verify(
+                outbox
+        ).save(
+                eq(eventId),
+                eq("payload"),
+                any(Instant.class)
+        );
     }
 
     @Test
     void shouldRejectBlankPayload() {
 
+        UUID eventId = UUID.randomUUID();
+
         assertThrows(
                 IllegalArgumentException.class,
                 () -> service.replay(
-                        UUID.randomUUID(),
+                        eventId,
                         " ",
                         3
                 )
         );
 
         verifyNoInteractions(attempts);
-        verifyNoInteractions(publisher);
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void shouldRejectNullEventId() {
+
+        assertThrows(
+                NullPointerException.class,
+                () -> service.replay(
+                        null,
+                        "payload",
+                        3
+                )
+        );
+
+        verifyNoInteractions(attempts);
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void shouldRejectNullPayload() {
+
+        assertThrows(
+                NullPointerException.class,
+                () -> service.replay(
+                        UUID.randomUUID(),
+                        null,
+                        3
+                )
+        );
+
+        verifyNoInteractions(attempts);
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void shouldRejectInvalidMaximumReplay() {
+
+        UUID eventId = UUID.randomUUID();
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.replay(
+                        eventId,
+                        "payload",
+                        0
+                )
+        );
+
+        verifyNoInteractions(attempts);
+        verifyNoInteractions(outbox);
     }
 }

@@ -1,7 +1,7 @@
 package org.fincore.wealth.position.application.service;
 
 import org.fincore.wealth.position.application.port.DlqReplayAttemptRepository;
-import org.fincore.wealth.position.application.port.PositionChangedEventPublisher;
+import org.fincore.wealth.position.application.port.DlqReplayOutboxRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,17 +13,17 @@ import java.util.UUID;
 @Service
 public class DlqEventReplayService {
 
-    private final PositionChangedEventPublisher publisher;
     private final DlqReplayAttemptRepository attempts;
+    private final DlqReplayOutboxRepository outbox;
     private final Clock clock;
 
     public DlqEventReplayService(
-            PositionChangedEventPublisher publisher,
             DlqReplayAttemptRepository attempts,
+            DlqReplayOutboxRepository outbox,
             Clock clock
     ) {
-        this.publisher = publisher;
         this.attempts = attempts;
+        this.outbox = outbox;
         this.clock = clock;
     }
 
@@ -52,14 +52,11 @@ public class DlqEventReplayService {
             return DlqReplayResult.REJECTED;
         }
 
-        boolean published =
-                publisher.publish(payload);
-
-        if (!published) {
-            throw new IllegalStateException(
-                    "Unable to publish DLQ event"
-            );
-        }
+        outbox.save(
+                eventId,
+                payload,
+                now
+        );
 
         return DlqReplayResult.REPLAYED;
     }
