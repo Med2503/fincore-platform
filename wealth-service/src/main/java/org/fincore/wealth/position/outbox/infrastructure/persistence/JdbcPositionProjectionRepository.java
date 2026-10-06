@@ -5,6 +5,8 @@ import org.fincore.wealth.position.application.projection.PositionProjection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,26 +26,26 @@ public class JdbcPositionProjectionRepository
     public void save(PositionProjection projection) {
         jdbcTemplate.update(
                 """
-                INSERT INTO position_projections (
-                    portfolio_id,
-                    asset_id,
-                    quantity,
-                    average_cost,
-                    currency,
-                    execution_sequence,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (portfolio_id, asset_id)
-                DO UPDATE SET
-                    quantity = EXCLUDED.quantity,
-                    average_cost = EXCLUDED.average_cost,
-                    currency = EXCLUDED.currency,
-                    execution_sequence = EXCLUDED.execution_sequence,
-                    updated_at = EXCLUDED.updated_at
-                WHERE position_projections.execution_sequence
-                      < EXCLUDED.execution_sequence
-                """,
+                        INSERT INTO position_projections (
+                            portfolio_id,
+                            asset_id,
+                            quantity,
+                            average_cost,
+                            currency,
+                            execution_sequence,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (portfolio_id, asset_id)
+                        DO UPDATE SET
+                            quantity = EXCLUDED.quantity,
+                            average_cost = EXCLUDED.average_cost,
+                            currency = EXCLUDED.currency,
+                            execution_sequence = EXCLUDED.execution_sequence,
+                            updated_at = EXCLUDED.updated_at
+                        WHERE position_projections.execution_sequence
+                              < EXCLUDED.execution_sequence
+                        """,
                 projection.portfolioId(),
                 projection.assetId(),
                 projection.quantity(),
@@ -55,68 +57,43 @@ public class JdbcPositionProjectionRepository
     }
 
     @Override
-    public void delete(
-            UUID portfolioId,
-            UUID assetId
-    ) {
-        jdbcTemplate.update(
-                """
-                DELETE FROM position_projections
-                WHERE portfolio_id = ?
-                  AND asset_id = ?
-                """,
-                portfolioId,
-                assetId
-        );
-    }
-
-    @Override
     public Optional<PositionProjection> find(
             UUID portfolioId,
             UUID assetId
     ) {
         return jdbcTemplate.query(
                 """
-                SELECT portfolio_id,
-                       asset_id,
-                       quantity,
-                       average_cost,
-                       currency,
-                       execution_sequence,
-                       updated_at
-                FROM position_projections
-                WHERE portfolio_id = ?
-                  AND asset_id = ?
-                """,
-                rs -> {
-                    if (!rs.next()) {
-                        return Optional.empty();
-                    }
-
-                    return Optional.of(
-                            new PositionProjection(
-                                    rs.getObject(
-                                            "portfolio_id",
-                                            UUID.class
-                                    ),
-                                    rs.getObject(
-                                            "asset_id",
-                                            UUID.class
-                                    ),
-                                    rs.getBigDecimal("quantity"),
-                                    rs.getBigDecimal("average_cost"),
-                                    rs.getString("currency"),
-                                    rs.getLong(
-                                            "execution_sequence"
-                                    ),
-                                    rs.getTimestamp(
-                                            "updated_at"
-                                    ).toInstant()
-                            )
-                    );
-                },
+                        SELECT
+                            portfolio_id,
+                            asset_id,
+                            quantity,
+                            average_cost,
+                            currency,
+                            execution_sequence,
+                            updated_at
+                        FROM position_projections
+                        WHERE portfolio_id = ?
+                          AND asset_id = ?
+                        """,
+                this::map,
                 portfolioId,
                 assetId
+        ).stream().findFirst();
+    }
+
+    private PositionProjection map(
+            ResultSet resultSet,
+            int rowNumber
+    ) throws SQLException {
+
+        return new PositionProjection(
+                resultSet.getObject("portfolio_id", UUID.class),
+                resultSet.getObject("asset_id", UUID.class),
+                resultSet.getBigDecimal("quantity"),
+                resultSet.getBigDecimal("average_cost"),
+                resultSet.getString("currency"),
+                resultSet.getLong("execution_sequence"),
+                resultSet.getTimestamp("updated_at").toInstant()
         );
     }
 }

@@ -17,15 +17,7 @@ public class PositionChangedProjectionService {
     }
 
     public void apply(PositionChangedEvent event) {
-        if (event.quantity().signum() == 0) {
-            repository.delete(
-                    event.portfolioId(),
-                    event.assetId()
-            );
-            return;
-        }
-
-        PositionProjection projection =
+        repository.save(
                 new PositionProjection(
                         event.portfolioId(),
                         event.assetId(),
@@ -34,8 +26,7 @@ public class PositionChangedProjectionService {
                         event.currency(),
                         event.executionSequence(),
                         event.occurredAt()
-                );
-
-        repository.save(projection);
+                )
+        );
     }
 }

@@ -9,10 +9,11 @@ public interface PositionProjectionRepository {
 
     void save(PositionProjection projection);
 
-    void delete(UUID portfolioId, UUID assetId);
 
     Optional<PositionProjection> find(
             UUID portfolioId,
             UUID assetId
     );
+
+
 }

@@ -1,116 +1,148 @@
 package org.fincore.wealth.position.application.service;
 
+
 import org.fincore.wealth.position.application.event.PositionChangedEvent;
 import org.fincore.wealth.position.application.port.PositionProjectionRepository;
-import org.junit.jupiter.api.BeforeEach;
+import org.fincore.wealth.position.application.projection.PositionProjection;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
-@ExtendWith(MockitoExtension.class)
 class PositionChangedProjectionServiceTest {
 
-    @Mock
-    private PositionProjectionRepository repository;
+    private final PositionProjectionRepository repository =
+            mock(PositionProjectionRepository.class);
 
-    private PositionChangedProjectionService service;
-
-    @BeforeEach
-    void setUp() {
-        service = new PositionChangedProjectionService(repository);
-    }
+    private final PositionChangedProjectionService service =
+            new PositionChangedProjectionService(repository);
 
     @Test
-    void shouldSavePositionProjection() {
+    void shouldSaveOpenPosition() {
+        UUID portfolioId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+
         PositionChangedEvent event = event(
-                new BigDecimal("10.0000000000"),
-                new BigDecimal("125.5000000000"),
-                5
+                portfolioId,
+                assetId,
+                new BigDecimal("10"),
+                new BigDecimal("100.50"),
+                10
         );
 
         service.apply(event);
 
-        verify(repository).save(argThat(projection ->
-                projection.portfolioId().equals(
-                        event.portfolioId()
+        verify(repository).save(
+                argThat(projection ->
+                        projection.portfolioId().equals(portfolioId)
+                                && projection.assetId().equals(assetId)
+                                && projection.quantity()
+                                .compareTo(new BigDecimal("10")) == 0
+                                && projection.executionSequence() == 10
                 )
-                        && projection.assetId().equals(
-                        event.assetId()
-                )
-                        && projection.quantity().equals(
-                        event.quantity()
-                )
-                        && projection.averageCost().equals(
-                        event.averageCost()
-                )
-                        && projection.currency().equals(
-                        event.currency()
-                )
-                        && projection.executionSequence() == 5
-                        && projection.updatedAt().equals(
-                        event.occurredAt()
-                )
-        ));
-
-        verify(repository, never())
-                .delete(any(), any());
+        );
     }
 
     @Test
-    void shouldDeleteProjectionWhenPositionIsClosed() {
+    void shouldKeepTombstoneWhenPositionIsClosed() {
+        UUID portfolioId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+
         PositionChangedEvent event = event(
+                portfolioId,
+                assetId,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                8
+                11
         );
 
         service.apply(event);
 
-        verify(repository).delete(
-                event.portfolioId(),
-                event.assetId()
+        verify(repository).save(
+                argThat(projection ->
+                        projection.portfolioId().equals(portfolioId)
+                                && projection.assetId().equals(assetId)
+                                && projection.quantity().signum() == 0
+                                && projection.averageCost().signum() == 0
+                                && projection.executionSequence() == 11
+                )
         );
-
-        verify(repository, never()).save(any());
     }
 
     @Test
-    void shouldNotDeleteWhenQuantityIsPositive() {
+    void shouldPreserveSequenceOfClosedPosition() {
         PositionChangedEvent event = event(
-                BigDecimal.ONE,
-                new BigDecimal("100"),
-                3
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                25
         );
 
         service.apply(event);
 
-        verify(repository).save(any());
-        verify(repository, never()).delete(any(), any());
+        verify(repository).save(
+                argThat(projection ->
+                        projection.executionSequence() == 25
+                )
+        );
     }
 
     private PositionChangedEvent event(
+            UUID portfolioId,
+            UUID assetId,
             BigDecimal quantity,
             BigDecimal averageCost,
             long sequence
     ) {
         return new PositionChangedEvent(
+
                 UUID.randomUUID(),
-                UUID.randomUUID(),
-                UUID.randomUUID(),
+                portfolioId,
+                assetId,
                 quantity,
                 averageCost,
                 "EUR",
                 sequence,
-                Instant.parse(
-                        "2026-10-05T10:00:00Z"
-                )
+                Instant.parse("2026-09-30T10:00:00Z")
         );
+    }
+
+    @Test
+    void shouldIgnoreOlderEventAfterPositionClosure() {
+        UUID portfolioId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+
+        repository.save(new PositionProjection(
+                portfolioId,
+                assetId,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                "EUR",
+                11,
+                Instant.parse("2026-09-30T11:00:00Z")
+        ));
+
+        repository.save(new PositionProjection(
+                portfolioId,
+                assetId,
+                new BigDecimal("10"),
+                new BigDecimal("100"),
+                "EUR",
+                10,
+                Instant.parse("2026-09-30T10:00:00Z")
+        ));
+
+        PositionProjection projection =
+                repository.find(portfolioId, assetId).orElseThrow();
+
+        assertEquals(0, projection.quantity().signum());
+        assertEquals(11, projection.executionSequence());
     }
 }
