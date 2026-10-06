@@ -7,6 +7,7 @@ public interface DlqReplayOutboxRepository {
 
     void save(
             UUID eventId,
+            UUID aggregateId,
             String payload,
             Instant occurredAt
     );

@@ -1,7 +1,5 @@
 package org.fincore.wealth.position.infrastructure.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.fincore.wealth.position.application.port.DlqReplayOutboxRepository;
 
 import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
@@ -29,12 +27,14 @@ public class DlqReplayOutboxRepositoryAdapter
     @Override
     public void save(
             UUID eventId,
+            UUID aggregateId,
             String payload,
             Instant occurredAt
     ) {
         OutboxEvent event =
                 OutboxEvent.pending(
                         eventId,
+                        aggregateId,
                         EVENT_TYPE,
                         payload,
                         occurredAt

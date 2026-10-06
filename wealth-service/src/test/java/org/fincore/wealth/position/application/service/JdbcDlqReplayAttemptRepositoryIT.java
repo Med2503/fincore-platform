@@ -1,7 +1,6 @@
 package org.fincore.wealth.position.application.service;
 
 import org.fincore.wealth.position.application.port.DlqReplayAttemptRepository;
-import org.fincore.wealth.position.infrastructure.persistence.JdbcDlqReplayAttemptRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
