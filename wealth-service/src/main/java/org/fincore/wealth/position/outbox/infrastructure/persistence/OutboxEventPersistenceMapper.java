@@ -7,7 +7,30 @@ import org.springframework.stereotype.Component;
 @Component
 public class OutboxEventPersistenceMapper {
 
-    public OutboxEvent toDomain(OutboxEventJpaEntity entity) {
+    public OutboxEventJpaEntity toEntity(
+            OutboxEvent event
+    ) {
+        OutboxEventJpaEntity entity =
+                new OutboxEventJpaEntity();
+
+        entity.setId(event.id());
+        entity.setAggregateId(event.aggregateId());
+        entity.setEventType(event.eventType());
+        entity.setPayload(event.payload());
+        entity.setOccurredAt(event.occurredAt());
+        entity.setPublishedAt(event.publishedAt());
+        entity.setStatus(event.status());
+        entity.setRetryCount(event.retryCount());
+        entity.setNextAttemptAt(event.nextAttemptAt());
+        entity.setClaimedBy(event.claimedBy());
+        entity.setLockedUntil(event.lockedUntil());
+
+        return entity;
+    }
+
+    public OutboxEvent toDomain(
+            OutboxEventJpaEntity entity
+    ) {
         return new OutboxEvent(
                 entity.getId(),
                 entity.getAggregateId(),
@@ -17,34 +40,38 @@ public class OutboxEventPersistenceMapper {
                 entity.getPublishedAt(),
                 entity.getStatus(),
                 entity.getRetryCount(),
-                entity.getNextAttemptAt()
+                entity.getNextAttemptAt(),
+                entity.getClaimedBy(),
+                entity.getLockedUntil()
         );
-    }
-
-    public OutboxEventJpaEntity toEntity(OutboxEvent domain) {
-        OutboxEventJpaEntity entity =
-                new OutboxEventJpaEntity();
-
-        entity.setId(domain.id());
-        entity.setAggregateId(domain.aggregateId());
-        entity.setEventType(domain.eventType());
-        entity.setPayload(domain.payload());
-        entity.setOccurredAt(domain.occurredAt());
-        entity.setPublishedAt(domain.publishedAt());
-        entity.setStatus(domain.status());
-        entity.setRetryCount(domain.retryCount());
-        entity.setNextAttemptAt(domain.nextAttemptAt());
-
-        return entity;
     }
 
     public void updateEntity(
             OutboxEventJpaEntity entity,
-            OutboxEvent domain
+            OutboxEvent event
     ) {
-        entity.setPublishedAt(domain.publishedAt());
-        entity.setStatus(domain.status());
-        entity.setRetryCount(domain.retryCount());
-        entity.setNextAttemptAt(domain.nextAttemptAt());
+        entity.setPublishedAt(
+                event.publishedAt()
+        );
+
+        entity.setStatus(
+                event.status()
+        );
+
+        entity.setRetryCount(
+                event.retryCount()
+        );
+
+        entity.setNextAttemptAt(
+                event.nextAttemptAt()
+        );
+
+        entity.setClaimedBy(
+                event.claimedBy()
+        );
+
+        entity.setLockedUntil(
+                event.lockedUntil()
+        );
     }
 }

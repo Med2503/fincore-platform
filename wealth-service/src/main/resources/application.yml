@@ -31,11 +31,13 @@ wealth:
   market-price:
     max-age: ${WEALTH_MARKET_PRICE_MAX_AGE:30s}
 
-  outbox:
-    publisher:
-      fixed-delay: ${WEALTH_OUTBOX_FIXED_DELAY:2000}
-      batch-size: ${WEALTH_OUTBOX_BATCH_SIZE:50}
-      max-retries: ${WEALTH_OUTBOX_MAX_RETRIES:10}
+  wealth:
+    outbox:
+      publisher:
+        fixed-delay: ${WEALTH_OUTBOX_FIXED_DELAY:2000}
+        batch-size: ${WEALTH_OUTBOX_BATCH_SIZE:50}
+        max-retries: ${WEALTH_OUTBOX_MAX_RETRIES:10}
+        lease-duration: ${WEALTH_OUTBOX_LEASE_DURATION:30s}
 
   dlq:
     replay:

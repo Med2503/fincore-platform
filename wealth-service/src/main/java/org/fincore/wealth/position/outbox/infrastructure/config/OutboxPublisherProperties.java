@@ -7,35 +7,38 @@ import java.time.Duration;
 @ConfigurationProperties(
         prefix = "wealth.outbox.publisher"
 )
-public class OutboxPublisherProperties {
+public record OutboxPublisherProperties(
+        Duration fixedDelay,
+        int batchSize,
+        int maxRetries,
+        Duration leaseDuration
+) {
 
-    private Duration fixedDelay = Duration.ofSeconds(2);
+    public OutboxPublisherProperties {
+        if (fixedDelay.isNegative()
+                || fixedDelay.isZero()) {
+            throw new IllegalArgumentException(
+                    "Fixed delay must be positive"
+            );
+        }
 
-    private int batchSize = 50;
+        if (batchSize <= 0) {
+            throw new IllegalArgumentException(
+                    "Batch size must be positive"
+            );
+        }
 
-    private int maxRetries = 10;
+        if (maxRetries <= 0) {
+            throw new IllegalArgumentException(
+                    "Maximum retries must be positive"
+            );
+        }
 
-    public Duration getFixedDelay() {
-        return fixedDelay;
-    }
-
-    public void setFixedDelay(Duration fixedDelay) {
-        this.fixedDelay = fixedDelay;
-    }
-
-    public int getBatchSize() {
-        return batchSize;
-    }
-
-    public void setBatchSize(int batchSize) {
-        this.batchSize = batchSize;
-    }
-
-    public int getMaxRetries() {
-        return maxRetries;
-    }
-
-    public void setMaxRetries(int maxRetries) {
-        this.maxRetries = maxRetries;
+        if (leaseDuration.isNegative()
+                || leaseDuration.isZero()) {
+            throw new IllegalArgumentException(
+                    "Lease duration must be positive"
+            );
+        }
     }
 }

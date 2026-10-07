@@ -2,12 +2,12 @@ package org.fincore.wealth.position.outbox.infrastructure.persistence;
 
 import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
-import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @Repository
 public class OutboxEventRepositoryAdapter
@@ -51,24 +51,57 @@ public class OutboxEventRepositoryAdapter
                                 )
                         );
 
-        mapper.updateEntity(entity, event);
+        mapper.updateEntity(
+                entity,
+                event
+        );
 
         repository.save(entity);
     }
 
     @Override
     @Transactional
-    public List<OutboxEvent> findPending(
+    public List<OutboxEvent> claimBatch(
             Instant now,
+            Instant lockedUntil,
+            UUID workerId,
             int batchSize
     ) {
-        return repository.findPendingForUpdate(
-                        OutboxEventStatus.PENDING.name(),
+        List<OutboxEventJpaEntity> entities =
+                repository.findClaimable(
                         now,
                         batchSize
-                )
-                .stream()
-                .map(mapper::toDomain)
-                .toList();
+                );
+
+        List<OutboxEvent> claimed =
+                entities.stream()
+                        .map(mapper::toDomain)
+                        .map(event ->
+                                event.claim(
+                                        workerId,
+                                        lockedUntil
+                                )
+                        )
+                        .toList();
+
+        for (OutboxEvent event : claimed) {
+            OutboxEventJpaEntity entity =
+                    repository.findById(event.id())
+                            .orElseThrow(() ->
+                                    new IllegalStateException(
+                                            "Outbox event disappeared: "
+                                                    + event.id()
+                                    )
+                            );
+
+            mapper.updateEntity(
+                    entity,
+                    event
+            );
+        }
+
+        repository.flush();
+
+        return claimed;
     }
 }

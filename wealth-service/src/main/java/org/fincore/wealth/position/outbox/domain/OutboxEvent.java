@@ -1,7 +1,5 @@
 package org.fincore.wealth.position.outbox.domain;
 
-import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
-
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -15,7 +13,9 @@ public record OutboxEvent(
         Instant publishedAt,
         OutboxEventStatus status,
         int retryCount,
-        Instant nextAttemptAt
+        Instant nextAttemptAt,
+        UUID claimedBy,
+        Instant lockedUntil
 ) {
 
     public OutboxEvent {
@@ -64,7 +64,38 @@ public record OutboxEvent(
                 null,
                 OutboxEventStatus.PENDING,
                 0,
-                occurredAt
+                occurredAt,
+                null,
+                null
+        );
+    }
+
+    public OutboxEvent claim(
+            UUID workerId,
+            Instant lockedUntil
+    ) {
+        Objects.requireNonNull(
+                workerId,
+                "Worker ID is required"
+        );
+
+        Objects.requireNonNull(
+                lockedUntil,
+                "Locked until is required"
+        );
+
+        return new OutboxEvent(
+                id,
+                aggregateId,
+                eventType,
+                payload,
+                occurredAt,
+                publishedAt,
+                OutboxEventStatus.PROCESSING,
+                retryCount,
+                nextAttemptAt,
+                workerId,
+                lockedUntil
         );
     }
 
@@ -80,6 +111,8 @@ public record OutboxEvent(
                 publishedAt,
                 OutboxEventStatus.PUBLISHED,
                 retryCount,
+                null,
+                null,
                 null
         );
     }
@@ -99,7 +132,9 @@ public record OutboxEvent(
                         ? OutboxEventStatus.FAILED
                         : OutboxEventStatus.PENDING,
                 retryCount + 1,
-                nextAttemptAt
+                nextAttemptAt,
+                null,
+                null
         );
     }
 }

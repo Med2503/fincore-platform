@@ -5,11 +5,11 @@ import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
 import org.fincore.wealth.position.outbox.infrastructure.config.OutboxPublisherProperties;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
-
+import java.util.List;
+import java.util.UUID;
 
 @Service
 public class PublishOutboxEvents {
@@ -31,55 +31,104 @@ public class PublishOutboxEvents {
         this.clock = clock;
     }
 
-    @Transactional
-    public void publish(OutboxEvent event) {
-        boolean published =
-                publisher.publish(
-                        event.eventType(),
-                        event.payload()
+    public int publishBatch() {
+        Instant now = clock.instant();
+
+        UUID workerId = UUID.randomUUID();
+
+        Instant lockedUntil =
+                now.plus(
+                        properties.leaseDuration()
                 );
 
-        if (published) {
+        List<OutboxEvent> events =
+                repository.claimBatch(
+                        now,
+                        lockedUntil,
+                        workerId,
+                        properties.batchSize()
+                );
+
+        int published = 0;
+
+        for (OutboxEvent event : events) {
+            if (publish(event)) {
+                published++;
+            }
+        }
+
+        return published;
+    }
+
+    private boolean publish(
+            OutboxEvent event
+    ) {
+        try {
+            boolean sent =
+                    publisher.publish(
+                            event.eventType(),
+                            event.payload()
+                    );
+
+            if (!sent) {
+                handleFailure(event);
+                return false;
+            }
+
             repository.update(
                     event.markPublished(
                             clock.instant()
                     )
             );
-            return;
-        }
 
-        handleFailure(event);
+            return true;
+
+        } catch (RuntimeException exception) {
+            handleFailure(event);
+            return false;
+        }
     }
 
-    private void handleFailure(OutboxEvent event) {
-        int nextRetry = event.retryCount() + 1;
+    private void handleFailure(
+            OutboxEvent event
+    ) {
+        int nextRetry =
+                event.retryCount() + 1;
 
         boolean permanentlyFailed =
-                nextRetry >= properties.getMaxRetries();
+                nextRetry >=
+                        properties.maxRetries();
 
-        Instant nextAttempt =
-                permanentlyFailed
-                        ? null
-                        : clock.instant()
-                        .plus(calculateBackoff(nextRetry));
+        Instant nextAttemptAt =
+                clock.instant()
+                        .plus(
+                                calculateBackoff(
+                                        nextRetry
+                                )
+                        );
 
         repository.update(
                 event.markFailed(
-                        nextAttempt,
+                        nextAttemptAt,
                         permanentlyFailed
                 )
         );
     }
 
     private java.time.Duration calculateBackoff(
-            int retryCount
+            int retry
     ) {
         long seconds =
                 Math.min(
                         60,
-                        1L << Math.min(retryCount, 6)
+                        1L << Math.min(
+                                retry - 1,
+                                6
+                        )
                 );
 
-        return java.time.Duration.ofSeconds(seconds);
+        return java.time.Duration.ofSeconds(
+                seconds
+        );
     }
 }

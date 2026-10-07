@@ -1,7 +1,12 @@
 package org.fincore.wealth.position.outbox.infrastructure.persistence;
 
-import jakarta.persistence.*;
-import org.fincore.wealth.position.outbox.domain.OutboxEventStatus;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import org.fincore.wealth.position.domain.OutboxEventStatus;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -13,30 +18,57 @@ public class OutboxEventJpaEntity {
     @Id
     private UUID id;
 
-    @Column(name = "aggregate_id", nullable = false)
+    @Column(
+            name = "aggregate_id",
+            nullable = false
+    )
     private UUID aggregateId;
 
-    @Column(name = "event_type", nullable = false, length = 100)
+    @Column(
+            name = "event_type",
+            nullable = false,
+            length = 100
+    )
     private String eventType;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(
+            name = "payload",
+            nullable = false,
+            columnDefinition = "TEXT"
+    )
     private String payload;
 
-    @Column(name = "occurred_at", nullable = false)
+    @Column(
+            name = "occurred_at",
+            nullable = false
+    )
     private Instant occurredAt;
 
     @Column(name = "published_at")
     private Instant publishedAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(
+            name = "status",
+            nullable = false,
+            length = 20
+    )
     private OutboxEventStatus status;
 
-    @Column(name = "retry_count", nullable = false)
+    @Column(
+            name = "retry_count",
+            nullable = false
+    )
     private int retryCount;
 
     @Column(name = "next_attempt_at")
     private Instant nextAttemptAt;
+
+    @Column(name = "claimed_by")
+    private UUID claimedBy;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
 
     protected OutboxEventJpaEntity() {
     }
@@ -111,5 +143,21 @@ public class OutboxEventJpaEntity {
 
     public void setNextAttemptAt(Instant nextAttemptAt) {
         this.nextAttemptAt = nextAttemptAt;
+    }
+
+    public UUID getClaimedBy() {
+        return claimedBy;
+    }
+
+    public void setClaimedBy(UUID claimedBy) {
+        this.claimedBy = claimedBy;
+    }
+
+    public Instant getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public void setLockedUntil(Instant lockedUntil) {
+        this.lockedUntil = lockedUntil;
     }
 }
