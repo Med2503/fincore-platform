@@ -4,694 +4,696 @@ import org.fincore.wealth.portfolio.application.port.PortfolioPositionLock;
 import org.fincore.wealth.position.application.event.PositionOutboxEventFactory;
 import org.fincore.wealth.position.application.port.PositionRepository;
 import org.fincore.wealth.position.application.port.ProcessedEventRepository;
+import org.fincore.wealth.position.domain.ExecutionEvent;
+import org.fincore.wealth.position.domain.Position;
 import org.fincore.wealth.position.outbox.application.port.OutboxEventRepository;
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
 import org.fincore.wealth.position.service.ExecutionEventProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class ExecutionEventProcessorTest {
 
-    @Mock
     private PositionRepository positionRepository;
-
-    @Mock
     private ProcessedEventRepository processedEvents;
-
-    @Mock
     private PortfolioPositionLock portfolioPositionLock;
-
-    @Mock
     private OutboxEventRepository outboxEvents;
-
-    @Mock
     private PositionOutboxEventFactory outboxEventFactory;
 
     private ExecutionEventProcessor processor;
 
-    private UUID portfolioId;
-    private UUID assetId;
+    private static final Instant NOW =
+            Instant.parse(
+                    "2026-09-30T10:00:00Z"
+            );
 
     @BeforeEach
     void setUp() {
-        processor = new ExecutionEventProcessor(
-                positionRepository,
-                processedEvents,
-                portfolioPositionLock,
-                outboxEvents,
-                outboxEventFactory
-        );
+        positionRepository =
+                mock(PositionRepository.class);
 
-        portfolioId = UUID.randomUUID();
-        assetId = UUID.randomUUID();
+        processedEvents =
+                mock(ProcessedEventRepository.class);
+
+        portfolioPositionLock =
+                mock(PortfolioPositionLock.class);
+
+        outboxEvents =
+                mock(OutboxEventRepository.class);
+
+        outboxEventFactory =
+                mock(PositionOutboxEventFactory.class);
+
+        processor =
+                new ExecutionEventProcessor(
+                        positionRepository,
+                        processedEvents,
+                        portfolioPositionLock,
+                        outboxEvents,
+                        outboxEventFactory
+                );
     }
 
     @Test
-    void shouldApplyFirstBuyAndCreateOutboxEvent() {
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                100L,
-                "10",
-                "100"
-        );
+    void shouldOpenPositionOnFirstBuy() {
+        ExecutionEvent event =
+                buyEvent(
+                        UUID.randomUUID(),
+                        1
+                );
 
-        Position savedPosition = position(
-                100L,
-                "10",
-                "100"
-        );
+        Position position =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "10",
+                        "100",
+                        1
+                );
 
-        OutboxEvent outboxEvent = outboxEvent();
+        OutboxEvent outbox =
+                outboxEvent(
+                        event,
+                        position
+                );
 
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(true);
 
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.empty());
+        when(
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                )
+        ).thenReturn(Optional.empty());
 
-        when(positionRepository.save(any(Position.class)))
-                .thenReturn(savedPosition);
+        when(
+                positionRepository.save(
+                        any(Position.class)
+                )
+        ).thenReturn(position);
 
-        when(outboxEventFactory.create(savedPosition))
-                .thenReturn(outboxEvent);
+        when(
+                outboxEventFactory.create(
+                        eq(position),
+                        eq(1L),
+                        eq(NOW)
+                )
+        ).thenReturn(outbox);
 
         ExecutionEventProcessor.ProcessingResult result =
                 processor.process(event);
 
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.APPLIED
-                );
-
-        verify(positionRepository)
-                .save(any(Position.class));
-
-        verify(outboxEventFactory)
-                .create(savedPosition);
-
-        verify(outboxEvents)
-                .save(outboxEvent);
-
-        verify(portfolioPositionLock)
-                .lockForPositionUpdate(portfolioId);
-    }
-
-    @Test
-    void shouldApplyHigherExecutionSequenceAndCreateOutboxEvent() {
-        Position current = position(
-                100L,
-                "100",
-                "90"
+        assertEquals(
+                ExecutionEventProcessor.ProcessingResult.APPLIED,
+                result
         );
-
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                101L,
-                "20",
-                "100"
-        );
-
-        Position updatedPosition = position(
-                101L,
-                "120",
-                "91.6666666667"
-        );
-
-        OutboxEvent outboxEvent = outboxEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        when(positionRepository.save(any(Position.class)))
-                .thenReturn(updatedPosition);
-
-        when(outboxEventFactory.create(updatedPosition))
-                .thenReturn(outboxEvent);
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.APPLIED
-                );
-
-        verify(positionRepository)
-                .save(any(Position.class));
-
-        verify(outboxEventFactory)
-                .create(updatedPosition);
-
-        verify(outboxEvents)
-                .save(outboxEvent);
-    }
-
-    @Test
-    void shouldApplyPartialSellAndCreateOutboxEvent() {
-        Position current = position(
-                100L,
-                "10",
-                "90"
-        );
-
-        ExecutionEvent event = sellEvent(
-                UUID.randomUUID(),
-                101L,
-                "4",
-                "120"
-        );
-
-        Position remainingPosition = position(
-                101L,
-                "6",
-                "90"
-        );
-
-        OutboxEvent outboxEvent = outboxEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        when(positionRepository.save(any(Position.class)))
-                .thenReturn(remainingPosition);
-
-        when(outboxEventFactory.create(remainingPosition))
-                .thenReturn(outboxEvent);
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.APPLIED
-                );
-
-        verify(positionRepository)
-                .save(any(Position.class));
-
-        verify(positionRepository, never())
-                .delete(any(Position.class));
-
-        verify(outboxEventFactory)
-                .create(remainingPosition);
-
-        verify(outboxEvents)
-                .save(outboxEvent);
 
         verify(
-                outboxEventFactory,
+                portfolioPositionLock
+        ).lockForPositionUpdate(
+                event.portfolioId()
+        );
+
+        verify(
+                positionRepository
+        ).save(
+                any(Position.class)
+        );
+
+        verify(
+                outboxEvents
+        ).save(outbox);
+    }
+
+    @Test
+    void shouldIncreaseExistingPositionOnBuy() {
+        ExecutionEvent event =
+                buyEvent(
+                        UUID.randomUUID(),
+                        2
+                );
+
+        Position current =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "10",
+                        "100",
+                        1
+                );
+
+        Position updated =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "20",
+                        "100",
+                        2
+                );
+
+        OutboxEvent outbox =
+                outboxEvent(
+                        event,
+                        updated
+                );
+
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(true);
+
+        when(
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                )
+        ).thenReturn(Optional.of(current));
+
+        when(
+                positionRepository.save(
+                        any(Position.class)
+                )
+        ).thenReturn(updated);
+
+        when(
+                outboxEventFactory.create(
+                        eq(updated),
+                        eq(2L),
+                        eq(NOW)
+                )
+        ).thenReturn(outbox);
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertEquals(
+                ExecutionEventProcessor.ProcessingResult.APPLIED,
+                result
+        );
+
+        verify(
+                positionRepository
+        ).save(
+                any(Position.class)
+        );
+
+        verify(
+                outboxEvents
+        ).save(outbox);
+    }
+
+    @Test
+    void shouldReducePositionOnPartialSell() {
+        ExecutionEvent event =
+                sellEvent(
+                        UUID.randomUUID(),
+                        2,
+                        "4"
+                );
+
+        Position current =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "10",
+                        "100",
+                        1
+                );
+
+        Position remaining =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "6",
+                        "100",
+                        2
+                );
+
+        OutboxEvent outbox =
+                outboxEvent(
+                        event,
+                        remaining
+                );
+
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(true);
+
+        when(
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                )
+        ).thenReturn(Optional.of(current));
+
+        when(
+                positionRepository.save(
+                        any(Position.class)
+                )
+        ).thenReturn(remaining);
+
+        when(
+                outboxEventFactory.create(
+                        eq(remaining),
+                        eq(2L),
+                        eq(NOW)
+                )
+        ).thenReturn(outbox);
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertEquals(
+                ExecutionEventProcessor.ProcessingResult.APPLIED,
+                result
+        );
+
+        verify(
+                positionRepository
+        ).save(
+                any(Position.class)
+        );
+
+        verify(
+                positionRepository,
                 never()
+        ).delete(
+                any(Position.class)
+        );
+
+        verify(
+                outboxEvents
+        ).save(outbox);
+    }
+
+    @Test
+    void shouldDeletePositionAndCreateTombstoneOnFullSell() {
+        ExecutionEvent event =
+                sellEvent(
+                        UUID.randomUUID(),
+                        2,
+                        "10"
+                );
+
+        Position current =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "10",
+                        "100",
+                        1
+                );
+
+        OutboxEvent outbox =
+                mock(OutboxEvent.class);
+
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(true);
+
+        when(
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                )
+        ).thenReturn(Optional.of(current));
+
+        when(
+                outboxEventFactory.createClosed(
+                        event.portfolioId(),
+                        event.assetId(),
+                        event.currency(),
+                        event.executionSequence(),
+                        event.occurredAt()
+                )
+        ).thenReturn(outbox);
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertEquals(
+                ExecutionEventProcessor.ProcessingResult.APPLIED,
+                result
+        );
+
+        verify(
+                positionRepository
+        ).delete(current);
+
+        verify(
+                positionRepository,
+                never()
+        ).save(
+                any(Position.class)
+        );
+
+        verify(
+                outboxEventFactory
         ).createClosed(
-                any(Position.class),
-                any(Instant.class),
-                anyLong()
+                event.portfolioId(),
+                event.assetId(),
+                event.currency(),
+                event.executionSequence(),
+                event.occurredAt()
         );
-    }
-
-    @Test
-    void shouldDeleteFullyClosedPositionAndCreateZeroQuantityOutboxEvent() {
-        Position current = position(
-                100L,
-                "10",
-                "90"
-        );
-
-        ExecutionEvent event = sellEvent(
-                UUID.randomUUID(),
-                101L,
-                "10",
-                "120"
-        );
-
-        OutboxEvent outboxEvent = outboxEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        when(outboxEventFactory.createClosed(
-                eq(current),
-                eq(event.occurredAt()),
-                eq(event.executionSequence())
-        )).thenReturn(outboxEvent);
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.APPLIED
-                );
-
-        verify(positionRepository)
-                .delete(current);
-
-        verify(positionRepository, never())
-                .save(any(Position.class));
-
-        verify(outboxEventFactory)
-                .createClosed(
-                        current,
-                        event.occurredAt(),
-                        event.executionSequence()
-                );
-
-        verify(outboxEvents)
-                .save(outboxEvent);
 
         verify(
-                outboxEventFactory,
+                outboxEvents
+        ).save(outbox);
+    }
+
+    @Test
+    void shouldReturnDuplicateWithoutProcessing() {
+        ExecutionEvent event =
+                buyEvent(
+                        UUID.randomUUID(),
+                        1
+                );
+
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(false);
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertEquals(
+                ExecutionEventProcessor.ProcessingResult.DUPLICATE,
+                result
+        );
+
+        verifyNoInteractions(
+                portfolioPositionLock
+        );
+
+        verifyNoInteractions(
+                positionRepository
+        );
+
+        verifyNoInteractions(
+                outboxEvents
+        );
+
+        verifyNoInteractions(
+                outboxEventFactory
+        );
+    }
+
+    @Test
+    void shouldReturnOutOfOrderWhenSequenceIsOlder() {
+        ExecutionEvent event =
+                buyEvent(
+                        UUID.randomUUID(),
+                        2
+                );
+
+        Position current =
+                position(
+                        event.portfolioId(),
+                        event.assetId(),
+                        "10",
+                        "100",
+                        5
+                );
+
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(true);
+
+        when(
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                )
+        ).thenReturn(Optional.of(current));
+
+        ExecutionEventProcessor.ProcessingResult result =
+                processor.process(event);
+
+        assertEquals(
+                ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER,
+                result
+        );
+
+        verify(
+                positionRepository,
                 never()
-        ).create(any(Position.class));
-    }
-
-    @Test
-    void shouldRejectLowerExecutionSequenceAsOutOfOrder() {
-        Position current = position(
-                100L,
-                "100",
-                "90"
+        ).save(
+                any(Position.class)
         );
 
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                99L,
-                "20",
-                "100"
-        );
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER
-                );
-
-        verify(positionRepository, never())
-                .save(any());
-
-        verify(positionRepository, never())
-                .delete(any());
-
-        verifyNoInteractions(
-                outboxEvents,
-                outboxEventFactory
-        );
-    }
-
-    @Test
-    void shouldRejectSameExecutionSequenceAsOutOfOrder() {
-        Position current = position(
-                100L,
-                "100",
-                "90"
-        );
-
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                100L,
-                "20",
-                "100"
-        );
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER
-                );
-
-        verify(positionRepository, never())
-                .save(any());
-
-        verify(positionRepository, never())
-                .delete(any());
-
-        verifyNoInteractions(
-                outboxEvents,
-                outboxEventFactory
-        );
-    }
-
-    @Test
-    void shouldReturnDuplicateWhenEventWasAlreadyClaimed() {
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                101L,
-                "10",
-                "100"
-        );
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(false);
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.DUPLICATE
-                );
-
-        verifyNoInteractions(
-                portfolioPositionLock,
+        verify(
                 positionRepository,
-                outboxEvents,
-                outboxEventFactory
+                never()
+        ).delete(
+                any(Position.class)
         );
-    }
-
-    @Test
-    void shouldKeepPositionUnchangedWhenEventIsOutOfOrder() {
-        Position current = position(
-                100L,
-                "100",
-                "90"
-        );
-
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                99L,
-                "50",
-                "200"
-        );
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        ExecutionEventProcessor.ProcessingResult result =
-                processor.process(event);
-
-        assertThat(result)
-                .isEqualTo(
-                        ExecutionEventProcessor.ProcessingResult.OUT_OF_ORDER
-                );
-
-        assertThat(current.quantity())
-                .isEqualByComparingTo("100");
-
-        assertThat(current.averageCost())
-                .isEqualByComparingTo("90");
-
-        assertThat(current.lastExecutionSequence())
-                .isEqualTo(100L);
-
-        verify(positionRepository, never())
-                .save(any());
-
-        verify(positionRepository, never())
-                .delete(any());
 
         verifyNoInteractions(
-                outboxEvents,
-                outboxEventFactory
-        );
-    }
-
-    @Test
-    void shouldRejectEventWithInvalidSequence() {
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                0L,
-                "10",
-                "100"
-        );
-
-        assertThatThrownBy(
-                () -> processor.process(event)
-        )
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Execution sequence must be positive"
-                );
-
-        verifyNoInteractions(
-                processedEvents,
-                portfolioPositionLock,
-                positionRepository,
-                outboxEvents,
-                outboxEventFactory
-        );
-    }
-
-    @Test
-    void shouldRejectSellWhenPositionDoesNotExist() {
-        ExecutionEvent event = sellEvent(
-                UUID.randomUUID(),
-                101L,
-                "10",
-                "120"
-        );
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.empty());
-
-        assertThatThrownBy(
-                () -> processor.process(event)
-        )
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Cannot sell without an existing position"
-                );
-
-        verify(positionRepository, never())
-                .save(any());
-
-        verify(positionRepository, never())
-                .delete(any());
-
-        verifyNoInteractions(
-                outboxEvents,
-                outboxEventFactory
-        );
-    }
-
-    @Test
-    void shouldClaimBeforeLockingAndLoadingPosition() {
-        ExecutionEvent event = buyEvent(
-                UUID.randomUUID(),
-                101L,
-                "10",
-                "100"
-        );
-
-        Position savedPosition = position(
-                101L,
-                "10",
-                "100"
-        );
-
-        OutboxEvent outboxEvent = outboxEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.empty());
-
-        when(positionRepository.save(any(Position.class)))
-                .thenReturn(savedPosition);
-
-        when(outboxEventFactory.create(savedPosition))
-                .thenReturn(outboxEvent);
-
-        processor.process(event);
-
-        InOrder order = inOrder(
-                processedEvents,
-                portfolioPositionLock,
-                positionRepository,
-                outboxEventFactory,
                 outboxEvents
         );
 
-        order.verify(processedEvents)
-                .claim(event.eventId());
-
-        order.verify(portfolioPositionLock)
-                .lockForPositionUpdate(portfolioId);
-
-        order.verify(positionRepository)
-                .findForUpdate(
-                        portfolioId,
-                        assetId
-                );
-
-        order.verify(positionRepository)
-                .save(any(Position.class));
-
-        order.verify(outboxEventFactory)
-                .create(savedPosition);
-
-        order.verify(outboxEvents)
-                .save(outboxEvent);
+        verifyNoInteractions(
+                outboxEventFactory
+        );
     }
 
     @Test
-    void shouldCreateClosedOutboxEventAfterDeletingPosition() {
-        Position current = position(
-                100L,
-                "10",
-                "90"
-        );
-
-        ExecutionEvent event = sellEvent(
-                UUID.randomUUID(),
-                101L,
-                "10",
-                "120"
-        );
-
-        OutboxEvent outboxEvent = outboxEvent();
-
-        when(processedEvents.claim(event.eventId()))
-                .thenReturn(true);
-
-        when(positionRepository.findForUpdate(
-                portfolioId,
-                assetId
-        )).thenReturn(Optional.of(current));
-
-        when(outboxEventFactory.createClosed(
-                current,
-                event.occurredAt(),
-                event.executionSequence()
-        )).thenReturn(outboxEvent);
-
-        processor.process(event);
-
-        InOrder order = inOrder(
-                positionRepository,
-                outboxEventFactory,
-                outboxEvents
-        );
-
-        order.verify(positionRepository)
-                .delete(current);
-
-        order.verify(outboxEventFactory)
-                .createClosed(
-                        current,
-                        event.occurredAt(),
-                        event.executionSequence()
+    void shouldRejectSellWithoutPosition() {
+        ExecutionEvent event =
+                sellEvent(
+                        UUID.randomUUID(),
+                        1,
+                        "10"
                 );
 
-        order.verify(outboxEvents)
-                .save(outboxEvent);
+        when(
+                processedEvents.claim(
+                        event.eventId()
+                )
+        ).thenReturn(true);
+
+        when(
+                positionRepository.findForUpdate(
+                        event.portfolioId(),
+                        event.assetId()
+                )
+        ).thenReturn(Optional.empty());
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> processor.process(event)
+        );
+
+        verify(
+                positionRepository,
+                never()
+        ).save(
+                any(Position.class)
+        );
+
+        verifyNoInteractions(
+                outboxEvents
+        );
+    }
+
+    @Test
+    void shouldRejectNullEvent() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> processor.process(null)
+        );
+
+        verifyNoInteractions(
+                processedEvents
+        );
+
+        verifyNoInteractions(
+                portfolioPositionLock
+        );
+    }
+
+    @Test
+    void shouldRejectNonPositiveQuantity() {
+        ExecutionEvent event =
+                new ExecutionEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        ExecutionEvent.Side.BUY,
+                        BigDecimal.ZERO,
+                        new BigDecimal("100"),
+                        BigDecimal.ZERO,
+                        "EUR",
+                        NOW,
+                        1
+                );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> processor.process(event)
+        );
+
+        verifyNoInteractions(
+                processedEvents
+        );
+    }
+
+    @Test
+    void shouldRejectNegativePrice() {
+        ExecutionEvent event =
+                new ExecutionEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        ExecutionEvent.Side.BUY,
+                        new BigDecimal("10"),
+                        new BigDecimal("-1"),
+                        BigDecimal.ZERO,
+                        "EUR",
+                        NOW,
+                        1
+                );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> processor.process(event)
+        );
+
+        verifyNoInteractions(
+                processedEvents
+        );
+    }
+
+    @Test
+    void shouldRejectNegativeFees() {
+        ExecutionEvent event =
+                new ExecutionEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        ExecutionEvent.Side.BUY,
+                        new BigDecimal("10"),
+                        new BigDecimal("100"),
+                        new BigDecimal("-1"),
+                        "EUR",
+                        NOW,
+                        1
+                );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> processor.process(event)
+        );
+
+        verifyNoInteractions(
+                processedEvents
+        );
+    }
+
+    @Test
+    void shouldRejectInvalidSequence() {
+        ExecutionEvent event =
+                new ExecutionEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        ExecutionEvent.Side.BUY,
+                        new BigDecimal("10"),
+                        new BigDecimal("100"),
+                        BigDecimal.ZERO,
+                        "EUR",
+                        NOW,
+                        0
+                );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> processor.process(event)
+        );
+
+        verifyNoInteractions(
+                processedEvents
+        );
     }
 
     private ExecutionEvent buyEvent(
             UUID eventId,
-            long executionSequence,
-            String quantity,
-            String price
+            long sequence
     ) {
         return new ExecutionEvent(
                 eventId,
                 UUID.randomUUID(),
-                portfolioId,
-                assetId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
                 ExecutionEvent.Side.BUY,
-                new BigDecimal(quantity),
-                new BigDecimal(price),
-                BigDecimal.ZERO,
-                "USD",
-                Instant.parse(
-                        "2026-10-02T10:00:00Z"
-                ),
-                executionSequence
+                new BigDecimal("10"),
+                new BigDecimal("100"),
+                new BigDecimal("2"),
+                "EUR",
+                NOW,
+                sequence
         );
     }
 
     private ExecutionEvent sellEvent(
             UUID eventId,
-            long executionSequence,
-            String quantity,
-            String price
+            long sequence,
+            String quantity
     ) {
         return new ExecutionEvent(
                 eventId,
                 UUID.randomUUID(),
-                portfolioId,
-                assetId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
                 ExecutionEvent.Side.SELL,
                 new BigDecimal(quantity),
-                new BigDecimal(price),
-                BigDecimal.ZERO,
-                "USD",
-                Instant.parse(
-                        "2026-10-02T10:00:00Z"
-                ),
-                executionSequence
+                new BigDecimal("120"),
+                new BigDecimal("2"),
+                "EUR",
+                NOW,
+                sequence
         );
     }
 
     private Position position(
-            long sequence,
+            UUID portfolioId,
+            UUID assetId,
             String quantity,
-            String averageCost
+            String averageCost,
+            long sequence
     ) {
         return new Position(
                 UUID.randomUUID(),
@@ -699,22 +701,22 @@ class ExecutionEventProcessorTest {
                 assetId,
                 new BigDecimal(quantity),
                 new BigDecimal(averageCost),
-                "USD",
-                Instant.parse(
-                        "2026-10-02T09:00:00Z"
-                ),
+                "EUR",
+                NOW,
                 sequence
         );
     }
 
-    private OutboxEvent outboxEvent() {
+    private OutboxEvent outboxEvent(
+            ExecutionEvent event,
+            Position position
+    ) {
         return OutboxEvent.pending(
-                portfolioId,
+                event.eventId(),
+                position.portfolioId(),
                 "PositionChanged",
-                "{\"quantity\":10}",
-                Instant.parse(
-                        "2026-10-02T10:00:00Z"
-                )
+                "{}",
+                event.occurredAt()
         );
     }
 }

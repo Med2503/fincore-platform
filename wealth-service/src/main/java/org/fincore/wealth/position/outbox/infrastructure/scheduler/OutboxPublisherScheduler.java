@@ -1,7 +1,6 @@
 package org.fincore.wealth.position.outbox.infrastructure.scheduler;
 
 import org.fincore.wealth.position.outbox.application.service.PublishOutboxEvents;
-import org.fincore.wealth.position.outbox.infrastructure.config.OutboxPublisherProperties;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -9,14 +8,11 @@ import org.springframework.stereotype.Component;
 public class OutboxPublisherScheduler {
 
     private final PublishOutboxEvents publisher;
-    private final OutboxPublisherProperties properties;
 
     public OutboxPublisherScheduler(
-            PublishOutboxEvents publisher,
-            OutboxPublisherProperties properties
+            PublishOutboxEvents publisher
     ) {
         this.publisher = publisher;
-        this.properties = properties;
     }
 
     @Scheduled(

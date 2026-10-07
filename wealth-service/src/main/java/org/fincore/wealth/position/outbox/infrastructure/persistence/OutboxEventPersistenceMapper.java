@@ -1,7 +1,7 @@
 package org.fincore.wealth.position.outbox.infrastructure.persistence;
 
+
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
-import org.fincore.wealth.position.outbox.infrastructure.persistence.OutboxEventJpaEntity;
 import org.springframework.stereotype.Component;
 
 @Component
