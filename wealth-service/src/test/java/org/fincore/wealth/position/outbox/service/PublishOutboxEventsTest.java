@@ -1,3 +1,4 @@
+
 package org.fincore.wealth.position.outbox.service;
 
 import org.fincore.wealth.position.outbox.application.port.EventPublisher;
@@ -17,7 +18,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -27,368 +27,257 @@ import static org.mockito.Mockito.when;
 
 class PublishOutboxEventsTest {
 
+    private static final Instant NOW =
+            Instant.parse("2026-09-30T10:00:00Z");
+
+    private static final int BATCH_SIZE = 50;
+    private static final int MAX_RETRIES = 10;
+    private static final Duration LEASE_DURATION =
+            Duration.ofSeconds(30);
+
     private OutboxEventRepository repository;
     private EventPublisher publisher;
     private PublishOutboxEvents service;
-    private Clock clock;
-
-    private static final Instant NOW =
-            Instant.parse(
-                    "2026-09-30T10:00:00Z"
-            );
 
     @BeforeEach
     void setUp() {
-        repository =
-                mock(OutboxEventRepository.class);
+        repository = mock(OutboxEventRepository.class);
+        publisher = mock(EventPublisher.class);
 
-        publisher =
-                mock(EventPublisher.class);
-
-        clock =
-                Clock.fixed(
-                        NOW,
-                        ZoneOffset.UTC
-                );
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
         OutboxPublisherProperties properties =
                 new OutboxPublisherProperties(
                         Duration.ofSeconds(2),
-                        50,
-                        10,
-                        Duration.ofSeconds(30)
+                        BATCH_SIZE,
+                        MAX_RETRIES,
+                        LEASE_DURATION
                 );
 
-        service =
-                new PublishOutboxEvents(
-                        repository,
-                        publisher,
-                        properties,
-                        clock
-                );
+        service = new PublishOutboxEvents(
+                repository,
+                publisher,
+                properties,
+                clock
+        );
     }
 
     @Test
     void shouldClaimAndPublishEvents() {
-        UUID eventId = UUID.randomUUID();
-        UUID portfolioId = UUID.randomUUID();
-        UUID workerId = UUID.randomUUID();
+        OutboxEvent event = createClaimedEvent();
 
-        OutboxEvent event =
-                OutboxEvent.pending(
-                        eventId,
-                        portfolioId,
-                        "PositionChanged",
-                        "{\"eventId\":\"" + eventId + "\"}",
-                        NOW
-                ).claim(
-                        workerId,
-                        NOW.plusSeconds(30)
-                );
+        stubClaimBatch(List.of(event));
+        when(publisher.publish(
+                event.eventType(),
+                event.payload()
+        )).thenReturn(true);
 
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of(event)
-        );
+        int published = service.publishBatch();
 
-        when(
-                publisher.publish(
-                        "PositionChanged",
-                        event.payload()
-                )
-        ).thenReturn(true);
-
-        int published =
-                service.publishBatch();
-
-        assertEquals(
-                1,
-                published
-        );
+        assertEquals(1, published);
 
         verify(publisher).publish(
-                "PositionChanged",
+                event.eventType(),
                 event.payload()
         );
 
         verify(repository).update(
-                eq(
-                        event.markPublished(NOW)
-                )
+                eq(event.markPublished(NOW))
         );
+    }
+
+    @Test
+    void shouldReleaseLeaseAfterSuccessfulPublication() {
+        OutboxEvent event = createClaimedEvent();
+
+        stubClaimBatch(List.of(event));
+        when(publisher.publish(
+                event.eventType(),
+                event.payload()
+        )).thenReturn(true);
+
+        service.publishBatch();
+
+        OutboxEvent expected = event.markPublished(NOW);
+
+        assertEquals(OutboxEventStatus.PUBLISHED, expected.status());
+        assertEquals(NOW, expected.publishedAt());
+        assertEquals(null, expected.claimedBy());
+        assertEquals(null, expected.lockedUntil());
+
+        verify(repository).update(expected);
     }
 
     @Test
     void shouldReturnZeroWhenNoEventsAreClaimed() {
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of()
-        );
+        stubClaimBatch(List.of());
 
-        int published =
-                service.publishBatch();
+        int published = service.publishBatch();
 
-        assertEquals(
-                0,
-                published
-        );
+        assertEquals(0, published);
 
-        verify(
-                publisher,
-                never()
-        ).publish(
-                any(),
-                any()
-        );
-
-        verify(
-                repository,
-                never()
-        ).update(
-                any()
-        );
+        verify(publisher, never()).publish(any(), any());
+        verify(repository, never()).update(any(OutboxEvent.class));
     }
 
     @Test
-    void shouldMarkEventAsFailedWhenPublisherReturnsFalse() {
-        UUID eventId = UUID.randomUUID();
-        UUID portfolioId = UUID.randomUUID();
+    void shouldScheduleRetryWhenPublisherReturnsFalse() {
+        OutboxEvent event = createClaimedEvent();
 
-        OutboxEvent event =
-                OutboxEvent.pending(
-                        eventId,
-                        portfolioId,
-                        "PositionChanged",
-                        "{}",
-                        NOW
-                ).claim(
-                        UUID.randomUUID(),
-                        NOW.plusSeconds(30)
-                );
+        stubClaimBatch(List.of(event));
+        when(publisher.publish(
+                event.eventType(),
+                event.payload()
+        )).thenReturn(false);
 
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of(event)
+        int published = service.publishBatch();
+
+        assertEquals(0, published);
+
+        OutboxEvent expected = event.markFailed(
+                NOW.plusSeconds(1),
+                false
         );
 
-        when(
-                publisher.publish(
-                        "PositionChanged",
-                        "{}"
-                )
-        ).thenReturn(false);
+        assertEquals(OutboxEventStatus.PENDING, expected.status());
+        assertEquals(1, expected.retryCount());
+        assertEquals(NOW.plusSeconds(1), expected.nextAttemptAt());
+        assertEquals(null, expected.claimedBy());
+        assertEquals(null, expected.lockedUntil());
 
-        int published =
-                service.publishBatch();
-
-        assertEquals(
-                0,
-                published
-        );
-
-        verify(repository).update(
-                eq(
-                        event.markFailed(
-                                NOW.plusSeconds(1),
-                                false
-                        )
-                )
-        );
+        verify(repository).update(expected);
     }
 
     @Test
-    void shouldMarkEventAsFailedWhenPublisherThrows() {
-        UUID eventId = UUID.randomUUID();
-        UUID portfolioId = UUID.randomUUID();
+    void shouldScheduleRetryWhenPublisherThrows() {
+        OutboxEvent event = createClaimedEvent();
 
-        OutboxEvent event =
-                OutboxEvent.pending(
-                        eventId,
-                        portfolioId,
-                        "PositionChanged",
-                        "{}",
-                        NOW
-                ).claim(
-                        UUID.randomUUID(),
-                        NOW.plusSeconds(30)
-                );
-
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of(event)
+        stubClaimBatch(List.of(event));
+        when(publisher.publish(
+                event.eventType(),
+                event.payload()
+        )).thenThrow(
+                new IllegalStateException("Kafka unavailable")
         );
 
-        when(
-                publisher.publish(
-                        "PositionChanged",
-                        "{}"
-                )
-        ).thenThrow(
-                new IllegalStateException(
-                        "Kafka unavailable"
-                )
+        int published = service.publishBatch();
+
+        assertEquals(0, published);
+
+        OutboxEvent expected = event.markFailed(
+                NOW.plusSeconds(1),
+                false
         );
 
-        int published =
-                service.publishBatch();
+        assertEquals(OutboxEventStatus.PENDING, expected.status());
+        assertEquals(1, expected.retryCount());
+        assertEquals(null, expected.claimedBy());
+        assertEquals(null, expected.lockedUntil());
 
-        assertEquals(
-                0,
-                published
-        );
-
-        verify(repository).update(
-                eq(
-                        event.markFailed(
-                                NOW.plusSeconds(1),
-                                false
-                        )
-                )
-        );
+        verify(repository).update(expected);
     }
 
     @Test
     void shouldMarkEventAsPermanentlyFailedOnLastRetry() {
-        UUID eventId = UUID.randomUUID();
-        UUID portfolioId = UUID.randomUUID();
-
-        OutboxEvent event =
-                new OutboxEvent(
-                        eventId,
-                        portfolioId,
-                        "PositionChanged",
-                        "{}",
-                        NOW,
-                        null,
-                        OutboxEventStatus.PROCESSING,
-                        9,
-                        NOW,
-                        UUID.randomUUID(),
-                        NOW.plusSeconds(30)
-                );
-
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of(event)
+        OutboxEvent event = new OutboxEvent(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "PositionChanged",
+                "{}",
+                NOW,
+                null,
+                OutboxEventStatus.PROCESSING,
+                MAX_RETRIES - 1,
+                NOW,
+                UUID.randomUUID(),
+                NOW.plus(LEASE_DURATION)
         );
 
-        when(
-                publisher.publish(
-                        "PositionChanged",
-                        "{}"
-                )
-        ).thenReturn(false);
+        stubClaimBatch(List.of(event));
+        when(publisher.publish(
+                event.eventType(),
+                event.payload()
+        )).thenReturn(false);
 
-        service.publishBatch();
+        int published = service.publishBatch();
 
-        verify(repository).update(
-                eq(
-                        event.markFailed(
-                                NOW.plusSeconds(60),
-                                true
-                        )
-                )
+        assertEquals(0, published);
+
+        OutboxEvent expected = event.markFailed(
+                NOW.plusSeconds(60),
+                true
         );
+
+        assertEquals(OutboxEventStatus.FAILED, expected.status());
+        assertEquals(MAX_RETRIES, expected.retryCount());
+        assertEquals(null, expected.nextAttemptAt());
+        assertEquals(null, expected.claimedBy());
+        assertEquals(null, expected.lockedUntil());
+
+        verify(repository).update(expected);
     }
 
     @Test
     void shouldPublishMultipleEvents() {
-        OutboxEvent first =
-                createClaimedEvent();
+        OutboxEvent first = createClaimedEvent();
+        OutboxEvent second = createClaimedEvent();
 
-        OutboxEvent second =
-                createClaimedEvent();
+        stubClaimBatch(List.of(first, second));
+        when(publisher.publish(any(), any())).thenReturn(true);
 
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of(first, second)
+        int published = service.publishBatch();
+
+        assertEquals(2, published);
+
+        verify(publisher).publish(
+                first.eventType(),
+                first.payload()
         );
 
-        when(
-                publisher.publish(
-                        any(),
-                        any()
-                )
-        ).thenReturn(true);
-
-        int published =
-                service.publishBatch();
-
-        assertEquals(
-                2,
-                published
+        verify(publisher).publish(
+                second.eventType(),
+                second.payload()
         );
 
-        verify(repository).update(
-                eq(
-                        first.markPublished(NOW)
-                )
-        );
-
-        verify(repository).update(
-                eq(
-                        second.markPublished(NOW)
-                )
-        );
+        verify(repository).update(first.markPublished(NOW));
+        verify(repository).update(second.markPublished(NOW));
     }
 
     @Test
-    void shouldUseLeaseDurationWhenClaiming() {
-        when(
-                repository.claimBatch(
-                        eq(NOW),
-                        eq(NOW.plusSeconds(30)),
-                        any(UUID.class),
-                        eq(50)
-                )
-        ).thenReturn(
-                List.of()
-        );
+    void shouldUseConfiguredLeaseDurationWhenClaiming() {
+        stubClaimBatch(List.of());
 
         service.publishBatch();
 
         verify(repository).claimBatch(
                 eq(NOW),
-                eq(NOW.plusSeconds(30)),
+                eq(NOW.plus(LEASE_DURATION)),
                 any(UUID.class),
-                eq(50)
+                eq(BATCH_SIZE)
         );
+    }
+
+    @Test
+    void shouldUseConfiguredBatchSize() {
+        stubClaimBatch(List.of());
+
+        service.publishBatch();
+
+        verify(repository).claimBatch(
+                eq(NOW),
+                eq(NOW.plus(LEASE_DURATION)),
+                any(UUID.class),
+                eq(BATCH_SIZE)
+        );
+    }
+
+    private void stubClaimBatch(List<OutboxEvent> events) {
+        when(repository.claimBatch(
+                eq(NOW),
+                eq(NOW.plus(LEASE_DURATION)),
+                any(UUID.class),
+                eq(BATCH_SIZE)
+        )).thenReturn(events);
     }
 
     private OutboxEvent createClaimedEvent() {
@@ -396,11 +285,11 @@ class PublishOutboxEventsTest {
                 UUID.randomUUID(),
                 UUID.randomUUID(),
                 "PositionChanged",
-                "{}",
+                "{\"quantity\":10}",
                 NOW
         ).claim(
                 UUID.randomUUID(),
-                NOW.plusSeconds(30)
+                NOW.plus(LEASE_DURATION)
         );
     }
 }
