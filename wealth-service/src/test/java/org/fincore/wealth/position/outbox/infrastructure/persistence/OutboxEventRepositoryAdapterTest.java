@@ -1,3 +1,4 @@
+
 package org.fincore.wealth.position.outbox.infrastructure.persistence;
 
 import org.fincore.wealth.position.outbox.domain.OutboxEvent;
@@ -21,6 +22,11 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class OutboxEventRepositoryAdapterTest {
 
+    private static final Instant NOW =
+            Instant.parse("2026-10-05T10:00:00Z");
+
+    private static final int BATCH_SIZE = 50;
+
     @Mock
     private SpringDataOutboxEventRepository repository;
 
@@ -42,8 +48,7 @@ class OutboxEventRepositoryAdapterTest {
 
         eventId = UUID.randomUUID();
         aggregateId = UUID.randomUUID();
-        occurredAt =
-                Instant.parse("2026-10-05T10:00:00Z");
+        occurredAt = NOW;
     }
 
     @Test
@@ -53,20 +58,13 @@ class OutboxEventRepositoryAdapterTest {
         OutboxEventJpaEntity savedEntity = newEntity();
         OutboxEvent savedEvent = pendingEvent();
 
-        when(mapper.toEntity(event))
-                .thenReturn(entity);
+        when(mapper.toEntity(event)).thenReturn(entity);
+        when(repository.save(entity)).thenReturn(savedEntity);
+        when(mapper.toDomain(savedEntity)).thenReturn(savedEvent);
 
-        when(repository.save(entity))
-                .thenReturn(savedEntity);
+        OutboxEvent result = adapter.save(event);
 
-        when(mapper.toDomain(savedEntity))
-                .thenReturn(savedEvent);
-
-        OutboxEvent result =
-                adapter.save(event);
-
-        assertThat(result)
-                .isSameAs(savedEvent);
+        assertThat(result).isSameAs(savedEvent);
 
         verify(mapper).toEntity(event);
         verify(repository).save(entity);
@@ -76,23 +74,16 @@ class OutboxEventRepositoryAdapterTest {
     @Test
     void shouldUpdateExistingOutboxEvent() {
         OutboxEvent event = pendingEvent();
-
-        OutboxEventJpaEntity entity =
-                newEntity();
+        OutboxEventJpaEntity entity = newEntity();
 
         when(repository.findById(eventId))
                 .thenReturn(Optional.of(entity));
 
         adapter.update(event);
 
-        verify(repository)
-                .findById(eventId);
-
-        verify(mapper)
-                .updateEntity(entity, event);
-
-        verify(repository)
-                .save(entity);
+        verify(repository).findById(eventId);
+        verify(mapper).updateEntity(entity, event);
+        verify(repository).save(entity);
     }
 
     @Test
@@ -102,145 +93,149 @@ class OutboxEventRepositoryAdapterTest {
         when(repository.findById(eventId))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(
-                () -> adapter.update(event)
-        )
-                .isInstanceOf(
-                        IllegalArgumentException.class
-                )
-                .hasMessage(
-                        "Outbox event not found: " + eventId
-                );
+        assertThatThrownBy(() -> adapter.update(event))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Outbox event not found: " + eventId);
 
-        verify(repository)
-                .findById(eventId);
-
-        verify(mapper, never())
-                .updateEntity(any(), any());
-
-        verify(repository, never())
-                .save(any());
+        verify(repository).findById(eventId);
+        verify(mapper, never()).updateEntity(any(), any());
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void shouldFindPendingEvents() {
-        Instant now =
-                Instant.parse(
-                        "2026-10-05T10:00:00Z"
-                );
+    void shouldClaimEventsAndAssignLeaseToWorker() {
+        UUID workerId = UUID.randomUUID();
+        Instant lockedUntil = NOW.plusSeconds(30);
 
-        OutboxEventJpaEntity first =
-                newEntity();
+        OutboxEventJpaEntity entity = newEntity();
+        OutboxEvent domainEvent = pendingEvent();
 
-        OutboxEventJpaEntity second =
-                newEntity();
+        when(repository.findClaimable(NOW, BATCH_SIZE))
+                .thenReturn(List.of(entity));
+        when(mapper.toDomain(entity)).thenReturn(domainEvent);
+        when(repository.save(entity)).thenReturn(entity);
 
-        OutboxEvent firstDomain =
-                pendingEvent();
-
-        OutboxEvent secondDomain =
-                pendingEvent();
-
-        when(repository.findPendingForUpdate(
-                OutboxEventStatus.PENDING.name(),
-                now,
-                50
-        )).thenReturn(
-                List.of(first, second)
+        List<OutboxEvent> result = adapter.claimBatch(
+                NOW,
+                lockedUntil,
+                workerId,
+                BATCH_SIZE
         );
 
-        when(mapper.toDomain(first))
-                .thenReturn(firstDomain);
+        assertThat(result).hasSize(1);
 
-        when(mapper.toDomain(second))
-                .thenReturn(secondDomain);
+        OutboxEvent claimed = result.get(0);
 
-        List<OutboxEvent> result =
-                adapter.findPending(
-                        now,
-                        50
-                );
+        assertThat(claimed.id()).isEqualTo(eventId);
+        assertThat(claimed.aggregateId()).isEqualTo(aggregateId);
+        assertThat(claimed.eventType()).isEqualTo("PositionChanged");
+        assertThat(claimed.payload()).isEqualTo("{\"quantity\":100}");
+        assertThat(claimed.status()).isEqualTo(OutboxEventStatus.PROCESSING);
+        assertThat(claimed.claimedBy()).isEqualTo(workerId);
+        assertThat(claimed.lockedUntil()).isEqualTo(lockedUntil);
+        assertThat(claimed.retryCount()).isZero();
 
-        assertThat(result)
-                .containsExactly(
-                        firstDomain,
-                        secondDomain
-                );
-
-        verify(repository)
-                .findPendingForUpdate(
-                        OutboxEventStatus.PENDING.name(),
-                        now,
-                        50
-                );
-
-        verify(mapper)
-                .toDomain(first);
-
-        verify(mapper)
-                .toDomain(second);
+        verify(repository).findClaimable(NOW, BATCH_SIZE);
+        verify(mapper).toDomain(entity);
+        verify(mapper).updateEntity(entity, claimed);
+        verify(repository).save(entity);
+        verify(repository).flush();
     }
 
     @Test
-    void shouldReturnEmptyListWhenNoPendingEventsExist() {
-        Instant now =
-                Instant.parse(
-                        "2026-10-05T10:00:00Z"
-                );
+    void shouldReturnEmptyListWhenNoEventsCanBeClaimed() {
+        UUID workerId = UUID.randomUUID();
+        Instant lockedUntil = NOW.plusSeconds(30);
 
-        when(repository.findPendingForUpdate(
-                OutboxEventStatus.PENDING.name(),
-                now,
-                50
-        )).thenReturn(List.of());
+        when(repository.findClaimable(NOW, BATCH_SIZE))
+                .thenReturn(List.of());
 
-        List<OutboxEvent> result =
-                adapter.findPending(
-                        now,
-                        50
-                );
+        List<OutboxEvent> result = adapter.claimBatch(
+                NOW,
+                lockedUntil,
+                workerId,
+                BATCH_SIZE
+        );
 
-        assertThat(result)
-                .isEmpty();
+        assertThat(result).isEmpty();
 
-        verify(mapper, never())
-                .toDomain(any());
+        verify(repository).findClaimable(NOW, BATCH_SIZE);
+        verifyNoInteractions(mapper);
+        verify(repository, never()).save(any());
+        verify(repository, never()).flush();
     }
 
     @Test
-    void shouldUseRequestedBatchSize() {
-        Instant now =
-                Instant.parse(
-                        "2026-10-05T10:00:00Z"
-                );
+    void shouldClaimEveryReturnedEvent() {
+        UUID workerId = UUID.randomUUID();
+        Instant lockedUntil = NOW.plusSeconds(30);
 
-        when(repository.findPendingForUpdate(
-                OutboxEventStatus.PENDING.name(),
-                now,
-                10
-        )).thenReturn(List.of());
+        UUID secondEventId = UUID.randomUUID();
+        UUID secondAggregateId = UUID.randomUUID();
 
-        adapter.findPending(
-                now,
+        OutboxEventJpaEntity firstEntity = newEntity();
+        OutboxEventJpaEntity secondEntity = newEntity();
+        secondEntity.setId(secondEventId);
+        secondEntity.setAggregateId(secondAggregateId);
+
+        OutboxEvent firstEvent = pendingEvent();
+        OutboxEvent secondEvent = new OutboxEvent(
+                secondEventId,
+                secondAggregateId,
+                "PositionChanged",
+                "{\"quantity\":200}",
+                occurredAt,
+                null,
+                OutboxEventStatus.PENDING,
+                0,
+                occurredAt,
+                null,
+                null
+        );
+
+        when(repository.findClaimable(NOW, 10))
+                .thenReturn(List.of(firstEntity, secondEntity));
+        when(mapper.toDomain(firstEntity)).thenReturn(firstEvent);
+        when(mapper.toDomain(secondEntity)).thenReturn(secondEvent);
+        when(repository.save(any(OutboxEventJpaEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<OutboxEvent> result = adapter.claimBatch(
+                NOW,
+                lockedUntil,
+                workerId,
                 10
         );
 
-        ArgumentCaptor<Integer> captor =
-                ArgumentCaptor.forClass(
-                        Integer.class
-                );
+        assertThat(result)
+                .hasSize(2)
+                .allSatisfy(event -> {
+                    assertThat(event.status())
+                            .isEqualTo(OutboxEventStatus.PROCESSING);
+                    assertThat(event.claimedBy()).isEqualTo(workerId);
+                    assertThat(event.lockedUntil()).isEqualTo(lockedUntil);
+                });
 
-        verify(repository)
-                .findPendingForUpdate(
-                        eq(
-                                OutboxEventStatus.PENDING.name()
-                        ),
-                        eq(now),
-                        captor.capture()
-                );
+        assertThat(result)
+                .extracting(OutboxEvent::id)
+                .containsExactly(eventId, secondEventId);
 
-        assertThat(captor.getValue())
-                .isEqualTo(10);
+        verify(repository).save(firstEntity);
+        verify(repository).save(secondEntity);
+        verify(repository).flush();
+    }
+
+    @Test
+    void shouldPassRequestedBatchSizeToRepository() {
+        UUID workerId = UUID.randomUUID();
+        Instant lockedUntil = NOW.plusSeconds(30);
+
+        when(repository.findClaimable(NOW, 10))
+                .thenReturn(List.of());
+
+        adapter.claimBatch(NOW, lockedUntil, workerId, 10);
+
+        verify(repository).findClaimable(NOW, 10);
     }
 
     private OutboxEvent pendingEvent() {
@@ -253,26 +248,26 @@ class OutboxEventRepositoryAdapterTest {
                 null,
                 OutboxEventStatus.PENDING,
                 0,
-                occurredAt
+                occurredAt,
+                null,
+                null
         );
     }
 
     private OutboxEventJpaEntity newEntity() {
-        OutboxEventJpaEntity entity =
-                new OutboxEventJpaEntity();
+        OutboxEventJpaEntity entity = new OutboxEventJpaEntity();
 
         entity.setId(eventId);
         entity.setAggregateId(aggregateId);
         entity.setEventType("PositionChanged");
-        entity.setPayload(
-                "{\"quantity\":100}"
-        );
+        entity.setPayload("{\"quantity\":100}");
         entity.setOccurredAt(occurredAt);
-        entity.setStatus(
-                OutboxEventStatus.PENDING
-        );
+        entity.setStatus(OutboxEventStatus.PENDING);
         entity.setRetryCount(0);
         entity.setNextAttemptAt(occurredAt);
+        entity.setPublishedAt(null);
+        entity.setClaimedBy(null);
+        entity.setLockedUntil(null);
 
         return entity;
     }
