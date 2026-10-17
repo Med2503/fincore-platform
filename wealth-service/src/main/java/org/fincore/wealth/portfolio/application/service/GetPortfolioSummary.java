@@ -1,15 +1,16 @@
+
 package org.fincore.wealth.portfolio.application.service;
 
 import org.fincore.wealth.portfolio.application.exception.PortfolioNotFoundException;
-import org.fincore.wealth.position.service.MarketPricePolicy;
 import org.fincore.wealth.portfolio.domain.PortfolioRepository;
-
 import org.fincore.wealth.portfolio.domain.PortfolioSummary;
 import org.fincore.wealth.position.application.port.MarketPriceProvider;
 import org.fincore.wealth.position.application.port.PositionRepository;
+import org.fincore.wealth.position.domain.MarketPrice;
 import org.fincore.wealth.position.domain.Position;
 import org.fincore.wealth.position.domain.PositionValuation;
 import org.fincore.wealth.position.exception.MixedPositionCurrencyException;
+import org.fincore.wealth.position.service.MarketPricePolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,7 +18,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class GetPortfolioSummary {
@@ -43,11 +47,18 @@ public class GetPortfolioSummary {
     }
 
     @Transactional(readOnly = true)
-    public PortfolioSummary execute(UUID userId, UUID portfolioId) {
+    public PortfolioSummary execute(
+            UUID userId,
+            UUID portfolioId
+    ) {
         portfolios.findOwnedById(portfolioId, userId)
-                .orElseThrow(() -> new PortfolioNotFoundException("not found!"));
+                .orElseThrow(() ->
+                        new PortfolioNotFoundException("Portfolio not found")
+                );
 
-        var portfolioPositions = positions.findAllByPortfolioId(portfolioId);
+        var portfolioPositions =
+                positions.findAllByPortfolioId(portfolioId);
+
         Instant now = clock.instant();
 
         if (portfolioPositions.isEmpty()) {
@@ -56,44 +67,61 @@ public class GetPortfolioSummary {
 
         String currency = portfolioPositions.getFirst().currency();
 
+        for (Position position : portfolioPositions) {
+            if (!currency.equalsIgnoreCase(position.currency())) {
+                throw new MixedPositionCurrencyException(
+                        "Portfolio positions must use the same currency"
+                );
+            }
+        }
+
+        Set<UUID> assetIds = portfolioPositions.stream()
+                .map(Position::assetId)
+                .collect(Collectors.toSet());
+
+        Map<UUID, MarketPrice> marketPrices =
+                prices.findLatestPrices(assetIds);
+
         BigDecimal totalCost = BigDecimal.ZERO;
         BigDecimal totalMarketValue = BigDecimal.ZERO;
+
         int valued = 0;
         int missing = 0;
         int stale = 0;
 
         for (Position position : portfolioPositions) {
-            if (!currency.equals(position.currency())) {
-                throw new MixedPositionCurrencyException("mixed currency !");
-            }
-
             totalCost = totalCost.add(
                     position.quantity().multiply(position.averageCost())
             );
 
-            var quote = prices.findLatestPrice(position.assetId());
+            MarketPrice marketPrice =
+                    marketPrices.get(position.assetId());
 
-            if (quote.isEmpty()) {
+            if (marketPrice == null) {
                 missing++;
                 continue;
             }
-
-            var marketPrice = quote.get();
 
             if (!currency.equalsIgnoreCase(marketPrice.currency())) {
                 missing++;
                 continue;
             }
 
-            if (!pricePolicy.isFresh(marketPrice, now)) {
+            if (!pricePolicy.isUsable(marketPrice, now)) {
                 stale++;
                 continue;
             }
 
             PositionValuation valuation =
-                    PositionValuation.calculate(position, marketPrice.price());
+                    PositionValuation.calculate(
+                            position,
+                            marketPrice.price()
+                    );
 
-            totalMarketValue = totalMarketValue.add(valuation.marketValue());
+            totalMarketValue = totalMarketValue.add(
+                    valuation.marketValue()
+            );
+
             valued++;
         }
 
@@ -101,10 +129,15 @@ public class GetPortfolioSummary {
                 ? totalMarketValue.subtract(totalCost)
                 : null;
 
-        BigDecimal pnlPercentage = pnl == null || totalCost.signum() == 0
-                ? null
-                : pnl.multiply(BigDecimal.valueOf(100))
-                .divide(totalCost, 8, RoundingMode.HALF_EVEN);
+        BigDecimal pnlPercentage =
+                pnl == null || totalCost.signum() == 0
+                        ? null
+                        : pnl.multiply(BigDecimal.valueOf(100))
+                        .divide(
+                                totalCost,
+                                8,
+                                RoundingMode.HALF_EVEN
+                        );
 
         return new PortfolioSummary(
                 currency,
@@ -122,7 +155,11 @@ public class GetPortfolioSummary {
 
     private PortfolioSummary emptySummary(Instant now) {
         return new PortfolioSummary(
-                null, 0, 0, 0, 0,
+                null,
+                0,
+                0,
+                0,
+                0,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
